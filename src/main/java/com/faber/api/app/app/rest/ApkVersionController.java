@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @FaLogBiz("APP-APK版本表")
 @RestController
-@RequestMapping("/api/app/apkVersion")
+@RequestMapping("/api/app/app/apkVersion")
 public class ApkVersionController extends BaseController<ApkVersionBiz, ApkVersion, Integer> {
 
 }

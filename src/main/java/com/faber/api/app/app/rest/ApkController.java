@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @FaLogBiz("APP-APK表")
 @RestController
-@RequestMapping("/api/app/apk")
+@RequestMapping("/api/app/app/apk")
 public class ApkController extends BaseController<ApkBiz, Apk, Integer> {
 
 }
