@@ -32,7 +32,7 @@ public class ApkVersion extends BaseDelEntity {
     private String applicationId;
 
     @ExcelProperty("版本号")
-    private Integer versionCode;
+    private Long versionCode;
 
     @ExcelProperty("版本名称")
     private String versionName;

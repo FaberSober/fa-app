@@ -2,10 +2,12 @@ package com.faber.api.app;
 
 import net.dongliu.apk.parser.ApkFile;
 import net.dongliu.apk.parser.bean.ApkMeta;
+import net.dongliu.apk.parser.bean.IconFace;
 import net.dongliu.apk.parser.bean.UseFeature;
 import org.junit.Test;
 
 import java.io.*;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
@@ -17,7 +19,8 @@ import java.util.zip.ZipInputStream;
  */
 public class AppInfoTest {
 
-    private String filePath = "D:\\Temp\\file\\apk\\app-release.apk";
+//    private String filePath = "D:\\Temp\\file\\apk\\app-release.apk";
+    private String filePath = "/Users/xupengfei/Downloads/tmp/app-release.apk";
 
     @Test
     public void testGetAppInfo() throws IOException {
@@ -38,6 +41,9 @@ public class AppInfoTest {
         System.out.println("大小       :" + (double) (file.length() * 100 / 1024 / 1024) / 100 + " MB");
         //  System.out.println("全部       :===============================");
         //  System.out.println(apkMeta.toString());
+
+        //  解析图标
+        List<IconFace> icons = apkFile.getAllIcons();
 
         //  拷贝图标
         saveBit(filePath, apkMeta.getIcon());
