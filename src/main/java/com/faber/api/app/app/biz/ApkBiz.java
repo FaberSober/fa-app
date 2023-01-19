@@ -110,4 +110,13 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         return apk;
     }
 
+    @Override
+    public boolean updateById(Apk entity) {
+        long count = lambdaQuery()
+                .eq(Apk::getShortCode, entity.getShortCode())
+                .ne(Apk::getId, entity.getId())
+                .count();
+        if (count > 1) throw new BuzzException("该短链已存在，请更换短链");
+        return super.updateById(entity);
+    }
 }
