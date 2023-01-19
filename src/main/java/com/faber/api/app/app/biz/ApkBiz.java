@@ -1,6 +1,7 @@
 package com.faber.api.app.app.biz;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.RandomUtil;
 import com.faber.api.app.app.entity.Apk;
 import com.faber.api.app.app.entity.ApkVersion;
 import com.faber.api.app.app.mapper.ApkMapper;
@@ -59,6 +60,13 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
             FileUtil.writeBytes(iconFile, icon.getData());
             FileSave fileSave = fileSaveBiz.upload(iconFile);
             apkInfo.setIconId(fileSave.getId());
+        }
+
+        Apk apk = this.getApkByApplicationId(apkInfo.getApplicationId());
+        if (apk != null) {
+            apkInfo.setShortCode(apk.getShortCode());
+        } else {
+            apkInfo.setShortCode(RandomUtil.randomString(4));
         }
 
         return apkInfo;

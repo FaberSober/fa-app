@@ -20,7 +20,7 @@ import java.util.zip.ZipInputStream;
 public class AppInfoTest {
 
 //    private String filePath = "D:\\Temp\\file\\apk\\app-release.apk";
-    private String filePath = "/Users/xupengfei/Downloads/tmp/app-release.apk";
+    private String filePath = "/Users/xupengfei/Downloads/tmp/app-release-1.0.1.apk";
 
     @Test
     public void testGetAppInfo() throws IOException {
@@ -36,7 +36,8 @@ public class AppInfoTest {
 
         System.out.println("应用名称   :" + apkMeta.getLabel());
         System.out.println("包名       :" + apkMeta.getPackageName());
-        System.out.println("版本号     :" + apkMeta.getVersionName());
+        System.out.println("版本号     :" + apkMeta.getVersionCode());
+        System.out.println("版本名     :" + apkMeta.getVersionName());
         System.out.println("图标       :" + apkMeta.getIcon());
         System.out.println("大小       :" + (double) (file.length() * 100 / 1024 / 1024) / 100 + " MB");
         //  System.out.println("全部       :===============================");
@@ -46,7 +47,7 @@ public class AppInfoTest {
         List<IconFace> icons = apkFile.getAllIcons();
 
         //  拷贝图标
-        saveBit(filePath, apkMeta.getIcon());
+//        saveBit(filePath, apkMeta.getIcon());
     }
 
     //  拷贝图标
