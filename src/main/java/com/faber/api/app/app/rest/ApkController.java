@@ -3,11 +3,13 @@ package com.faber.api.app.app.rest;
 import com.faber.api.app.app.vo.ApkInfo;
 import com.faber.core.annotation.FaLogBiz;
 import com.faber.core.annotation.FaLogOpr;
+import com.faber.core.config.validator.validator.Vg;
 import com.faber.core.enums.LogCrudEnum;
 import com.faber.core.vo.msg.Ret;
 import com.faber.core.web.rest.BaseController;
 import com.faber.api.app.app.biz.ApkBiz;
 import com.faber.api.app.app.entity.Apk;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -30,6 +32,14 @@ public class ApkController extends BaseController<ApkBiz, Apk, Integer> {
     public Ret<Apk> getApkInfo(@PathVariable("fileId") String fileId) throws IOException {
         Apk o = baseBiz.getApkInfo(fileId);
         return ok(o);
+    }
+
+    @FaLogOpr(value = "新增apk", crud = LogCrudEnum.C)
+    @RequestMapping(value = "/create", method = RequestMethod.POST)
+    @ResponseBody
+    public Ret<Apk> create(@Validated(value = Vg.Crud.C.class) @RequestBody Apk entity) {
+        baseBiz.create(entity);
+        return ok(entity);
     }
 
 }

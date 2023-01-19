@@ -28,6 +28,9 @@ public class ApkVersion extends BaseDelEntity {
     @ExcelProperty("应用ID")
     private Integer appId;
 
+    @ExcelProperty("应用名称")
+    private String name;
+
     @ExcelProperty("应用包名")
     private String applicationId;
 

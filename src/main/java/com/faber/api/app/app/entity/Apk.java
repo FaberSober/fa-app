@@ -6,9 +6,13 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.faber.core.annotation.FaModalName;
 import com.faber.core.bean.BaseDelEntity;
+import com.faber.core.config.validator.validator.Vg;
 import lombok.Data;
 
-    
+import javax.validation.constraints.NotNull;
+import javax.validation.constraints.Null;
+
+
 /**
  * APP-APK表
  * 
@@ -21,23 +25,38 @@ import lombok.Data;
 @Data
 public class Apk extends BaseDelEntity {
 
+    @Null(groups = Vg.Crud.C.class)
+    @NotNull(groups = Vg.Crud.U.class)
     @ExcelProperty("ID")
     @TableId(type = IdType.AUTO)
     private Integer id;
 
+    @NotNull
     @ExcelProperty("应用名称")
     private String name;
 
+    @NotNull
     @ExcelProperty("应用包名")
     private String applicationId;
 
+    @NotNull
     @ExcelProperty("当前版本号")
     private Long versionCode;
 
+    @NotNull
     @ExcelProperty("当前版本名称")
     private String versionName;
 
+    @NotNull
+    @ExcelProperty("apk文件ID")
+    private String fileId;
+
+    @NotNull
     @ExcelProperty("图标文件ID")
     private String iconId;
+
+    @NotNull
+    @ExcelProperty("短链")
+    private String shortCode;
 
 }
