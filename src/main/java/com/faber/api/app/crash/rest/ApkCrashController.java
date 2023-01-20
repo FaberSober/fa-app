@@ -2,6 +2,7 @@ package com.faber.api.app.crash.rest;
 
 import com.faber.core.annotation.FaLogBiz;
 import com.faber.core.annotation.FaLogOpr;
+import com.faber.core.config.annotation.IgnoreUserToken;
 import com.faber.core.config.validator.validator.Vg;
 import com.faber.core.enums.LogCrudEnum;
 import com.faber.core.vo.msg.Ret;
@@ -26,6 +27,7 @@ public class ApkCrashController extends BaseController<ApkCrashBiz, ApkCrash, In
     @FaLogOpr(value = "上传奔溃日志", crud = LogCrudEnum.C)
     @RequestMapping(value = "/upload", method = RequestMethod.POST)
     @ResponseBody
+    @IgnoreUserToken
     public Ret<Boolean> upload(@Validated(value = Vg.Crud.C.class) @RequestBody ApkCrash entity) {
         baseBiz.upload(entity);
         return ok();
