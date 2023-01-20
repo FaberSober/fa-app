@@ -3,6 +3,7 @@ package com.faber.api.app.crash.biz;
 import com.faber.api.app.app.biz.ApkBiz;
 import com.faber.api.app.crash.entity.ApkCrash;
 import com.faber.api.app.crash.mapper.ApkCrashMapper;
+import com.faber.core.context.BaseContextHandler;
 import com.faber.core.web.biz.BaseBiz;
 import org.springframework.stereotype.Service;
 
@@ -22,6 +23,10 @@ public class ApkCrashBiz extends BaseBiz<ApkCrashMapper, ApkCrash> {
     ApkBiz apkBiz;
 
     public void upload(ApkCrash entity) {
+        if (!BaseContextHandler.getLogin()) {
+            entity.setCrtUser("1");
+            entity.setCrtName("admin");
+        }
         super.save(entity);
     }
 }
