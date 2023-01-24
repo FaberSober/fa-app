@@ -1,24 +1,22 @@
 package com.faber.api.app.app.biz;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.faber.api.app.app.entity.Apk;
 import com.faber.api.app.app.entity.ApkVersion;
 import com.faber.api.app.app.mapper.ApkMapper;
-import com.faber.api.app.app.vo.ApkInfo;
 import com.faber.api.base.admin.biz.FileSaveBiz;
 import com.faber.api.base.admin.entity.FileSave;
-import com.faber.core.config.validator.validator.Vg;
 import com.faber.core.exception.BuzzException;
-import com.faber.core.vo.msg.Ret;
 import com.faber.core.web.biz.BaseBiz;
 import jodd.io.FileUtil;
 import net.dongliu.apk.parser.ApkFile;
 import net.dongliu.apk.parser.bean.ApkMeta;
 import net.dongliu.apk.parser.bean.IconFace;
 import org.springframework.stereotype.Service;
-import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
 import java.io.File;
@@ -126,5 +124,46 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
                 .count();
         if (count > 1) throw new BuzzException("该短链已存在，请更换短链");
         return super.updateById(entity);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public Apk apiUpload(MultipartFile file, Integer appId, String remark) throws IOException {
+        Apk apk = super.getById(appId);
+        if (apk == null) throw new BuzzException("AppId Not Found");
+
+        if (ObjUtil.notEqual(apk.getCrtUser(), getCurrentUserId())) {
+            throw new BuzzException("Wrong AppId, Please Check.");
+        }
+
+        FileSave apkFileSave = fileSaveBiz.upload(file);
+        Apk apkFileInfo = this.getApkInfo(apkFileSave.getId());
+
+        // 0. check info
+        if (ObjUtil.notEqual(apkFileInfo.getApplicationId(), apk.getApplicationId())) {
+            throw new BuzzException("ApplicationId Not Equal, Please Check.");
+        }
+
+        // 1. update apk info
+        apk.setName(apkFileInfo.getName());
+        apk.setVersionCode(apkFileInfo.getVersionCode());
+        apk.setVersionName(apkFileInfo.getVersionName());
+        apk.setFileId(apkFileInfo.getFileId());
+        apk.setIconId(apkFileInfo.getIconId());
+        apk.setRemark(remark);
+        this.updateById(apk);
+
+        // 2. save version info
+        ApkVersion apkVersion = new ApkVersion();
+        apkVersion.setAppId(apk.getId());
+        apkVersion.setApplicationId(apk.getApplicationId());
+        apkVersion.setName(apkFileInfo.getName());
+        apkVersion.setVersionCode(apkFileInfo.getVersionCode());
+        apkVersion.setVersionName(apkFileInfo.getVersionName());
+        apkVersion.setFileId(apkFileInfo.getFileId());
+        apkVersion.setIconId(apkFileInfo.getIconId());
+        apkVersion.setRemark(remark);
+        apkVersionBiz.save(apkVersion);
+
+        return apk;
     }
 }

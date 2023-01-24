@@ -59,4 +59,7 @@ public class Apk extends BaseDelEntity {
     @ExcelProperty("短链")
     private String shortCode;
 
+    @ExcelProperty("最近版本信息")
+    private String remark;
+
 }

@@ -4,6 +4,7 @@ import com.faber.api.app.app.biz.ApkBiz;
 import com.faber.api.app.app.entity.Apk;
 import com.faber.core.annotation.FaLogBiz;
 import com.faber.core.annotation.FaLogOpr;
+import com.faber.core.config.annotation.ApiToken;
 import com.faber.core.config.annotation.IgnoreUserToken;
 import com.faber.core.config.validator.validator.Vg;
 import com.faber.core.enums.LogCrudEnum;
@@ -11,6 +12,7 @@ import com.faber.core.vo.msg.Ret;
 import com.faber.core.web.rest.BaseController;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 
@@ -49,6 +51,17 @@ public class ApkController extends BaseController<ApkBiz, Apk, Integer> {
     public Ret<Apk> getApkLastRelease(@PathVariable("id") Integer id) {
         Apk o = baseBiz.getById(id);
         return ok(o);
+    }
+
+    @FaLogOpr(value = "API上传APK", crud = LogCrudEnum.C)
+    @PostMapping("/apiUpload")
+    @ResponseBody
+    @ApiToken
+    public Ret<Apk> apiUpload(@RequestParam("file") MultipartFile file,
+                              @RequestParam("appId") Integer appId,
+                              @RequestParam("remark") String remark) throws IOException {
+        Apk data = baseBiz.apiUpload(file, appId, remark);
+        return ok(data);
     }
 
 }
