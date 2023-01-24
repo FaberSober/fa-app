@@ -80,6 +80,9 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
     }
 
     public Apk create(Apk entity) {
+        FileSave apkFileSave = fileSaveBiz.getById(entity.getFileId());
+        entity.setSize(apkFileSave.getSize());
+
         // step 1: update apk info
         Apk apk = this.getApkByApplicationId(entity.getApplicationId());
         if (apk == null) {
@@ -103,7 +106,9 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
             apk.setVersionCode(entity.getVersionCode());
             apk.setVersionName(entity.getVersionName());
             apk.setFileId(entity.getFileId());
+            apk.setSize(apkFileSave.getSize());
             apk.setIconId(entity.getIconId());
+            apk.setRemark(entity.getRemark());
             super.updateById(apk);
         }
 
@@ -148,6 +153,7 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         apk.setVersionCode(apkFileInfo.getVersionCode());
         apk.setVersionName(apkFileInfo.getVersionName());
         apk.setFileId(apkFileInfo.getFileId());
+        apk.setSize(apkFileSave.getSize());
         apk.setIconId(apkFileInfo.getIconId());
         apk.setRemark(remark);
         this.updateById(apk);
@@ -160,6 +166,7 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         apkVersion.setVersionCode(apkFileInfo.getVersionCode());
         apkVersion.setVersionName(apkFileInfo.getVersionName());
         apkVersion.setFileId(apkFileInfo.getFileId());
+        apkVersion.setSize(apkFileSave.getSize());
         apkVersion.setIconId(apkFileInfo.getIconId());
         apkVersion.setRemark(remark);
         apkVersionBiz.save(apkVersion);
