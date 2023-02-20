@@ -20,8 +20,8 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- ----------------------------
 -- Table structure for app_apk
 -- ----------------------------
-DROP TABLE IF EXISTS `app_apk`;
-CREATE TABLE `app_apk` (
+
+CREATE TABLE IF NOT EXISTS `app_apk` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `name` varchar(255) NOT NULL COMMENT '应用名称',
   `application_id` varchar(255) NOT NULL COMMENT '应用包名',
@@ -53,8 +53,8 @@ COMMIT;
 -- ----------------------------
 -- Table structure for app_apk_crash
 -- ----------------------------
-DROP TABLE IF EXISTS `app_apk_crash`;
-CREATE TABLE `app_apk_crash` (
+
+CREATE TABLE IF NOT EXISTS `app_apk_crash` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `app_id` int(11) NOT NULL COMMENT '应用ID',
   `name` varchar(255) NOT NULL COMMENT '应用名称',
@@ -90,8 +90,8 @@ COMMIT;
 -- ----------------------------
 -- Table structure for app_apk_version
 -- ----------------------------
-DROP TABLE IF EXISTS `app_apk_version`;
-CREATE TABLE `app_apk_version` (
+
+CREATE TABLE IF NOT EXISTS `app_apk_version` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `app_id` int(11) NOT NULL COMMENT '应用ID',
   `name` varchar(255) NOT NULL COMMENT '应用名称',
