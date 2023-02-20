@@ -33,7 +33,8 @@ public class FaAppDbInit implements DbInit {
         List<FaDdl> list = new ArrayList<>();
 
         list.add(new FaDdl(100_000_000L, "V1.0.0", "初始化")
-                .addSql(new FaDdlSql("初始化", "sql/1.0.0_app_full.sql")));
+                .addSql(new FaDdlSql("初始化", "sql/1.0.0_app_full.sql"))
+                .addSql(new FaDdlSql("初始化data", "sql/1.0.0_app_data.sql")));
 
         return list;
     }
