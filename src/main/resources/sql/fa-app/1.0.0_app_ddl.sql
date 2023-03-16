@@ -1,18 +1,7 @@
-/*
- Navicat Premium Data Transfer
-
- Source Server         : localhost-dev-root
- Source Server Type    : MySQL
- Source Server Version : 50740
- Source Host           : localhost:3306
- Source Schema         : file_web
-
- Target Server Type    : MySQL
- Target Server Version : 50740
- File Encoding         : 65001
-
- Date: 20/02/2023 11:31:44
-*/
+-- ------------------------- info -------------------------
+-- @@ver: 1_000_000
+-- @@info: 初始化fa-app模块
+-- ------------------------- info -------------------------
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
@@ -57,7 +46,7 @@ COMMIT;
 CREATE TABLE IF NOT EXISTS `app_apk_crash` (
   `id` int(11) unsigned NOT NULL AUTO_INCREMENT COMMENT 'ID',
   `app_id` int(11) NOT NULL COMMENT '应用ID',
-  `name` varchar(255) NOT NULL COMMENT '应用名称',
+  `name` varchar(255) NOT NULL COMMENT '名称',
   `application_id` varchar(255) NOT NULL COMMENT '应用包名',
   `version_code` int(11) NOT NULL COMMENT '版本号',
   `version_name` varchar(255) NOT NULL COMMENT '版本名称',
