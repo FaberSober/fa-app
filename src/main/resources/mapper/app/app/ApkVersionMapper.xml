@@ -23,4 +23,8 @@
         <result property="deleted" column="deleted"/>
     </resultMap>
 
+    <update id="addDownloadNum" parameterType="map">
+        UPDATE app_apk_version SET download_num = download_num + 1 WHERE id = #{id}
+    </update>
+
 </mapper>

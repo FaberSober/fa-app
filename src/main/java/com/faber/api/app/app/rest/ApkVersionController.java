@@ -39,4 +39,15 @@ public class ApkVersionController extends BaseController<ApkVersionBiz, ApkVersi
         return ok(list);
     }
 
+    @IgnoreUserToken
+    @FaLogOpr(value = "下载数加一", crud = LogCrudEnum.C)
+    @LogNoRet
+    @RequestMapping(value = "/addDownloadNum", method = RequestMethod.POST)
+    @ResponseBody
+    public Ret<Boolean> addDownloadNum(@RequestBody Map<String, Object> params) {
+        Integer id = MapUtil.getInt(params, "id");
+        baseBiz.addDownloadNum(id);
+        return ok();
+    }
+
 }

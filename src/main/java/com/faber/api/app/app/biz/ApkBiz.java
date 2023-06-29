@@ -14,6 +14,7 @@ import jodd.io.FileUtil;
 import net.dongliu.apk.parser.ApkFile;
 import net.dongliu.apk.parser.bean.ApkMeta;
 import net.dongliu.apk.parser.bean.IconFace;
+import org.apache.ibatis.annotations.Param;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -179,5 +180,9 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         if (count != 1) throw new BuzzException("获取APP信息失败，请检查短码是否正确");
 
         return lambdaQuery().eq(Apk::getShortCode, shortCode).one();
+    }
+
+    public void sumDownloadNum(Integer id) {
+        baseMapper.sumDownloadNum(id);
     }
 }
