@@ -49,6 +49,9 @@ public class ApkVersion extends BaseDelEntity {
     @ExcelProperty("文件大小，单位字节")
     private Long size;
 
+    @ExcelProperty("下载次数")
+    private Integer downloadNum;
+
     @ExcelProperty("版本信息")
     private String remark;
 

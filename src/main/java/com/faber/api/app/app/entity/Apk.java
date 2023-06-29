@@ -54,6 +54,9 @@ public class Apk extends BaseDelEntity {
     @ExcelProperty("文件大小，单位字节")
     private Long size;
 
+    @ExcelProperty("下载次数")
+    private Integer downloadNum;
+
     @NotNull
     @ExcelProperty("图标文件ID")
     private String iconId;

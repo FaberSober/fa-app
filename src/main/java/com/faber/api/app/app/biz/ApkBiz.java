@@ -173,4 +173,11 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
 
         return apk;
     }
+
+    public Apk getByShortCode(String shortCode) {
+        long count = lambdaQuery().eq(Apk::getShortCode, shortCode).count();
+        if (count != 1) throw new BuzzException("获取APP信息失败，请检查短码是否正确");
+
+        return lambdaQuery().eq(Apk::getShortCode, shortCode).one();
+    }
 }

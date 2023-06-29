@@ -1,5 +1,6 @@
 package com.faber.api.app.app.rest;
 
+import cn.hutool.core.map.MapUtil;
 import com.faber.api.app.app.biz.ApkBiz;
 import com.faber.api.app.app.entity.Apk;
 import com.faber.core.annotation.FaLogBiz;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * APP-APK表
@@ -61,6 +63,16 @@ public class ApkController extends BaseController<ApkBiz, Apk, Integer> {
                               @RequestParam("appId") Integer appId,
                               @RequestParam("remark") String remark) throws IOException {
         Apk data = baseBiz.apiUpload(file, appId, remark);
+        return ok(data);
+    }
+
+    @IgnoreUserToken
+    @FaLogOpr(value = "短码获取APP信息", crud = LogCrudEnum.C)
+    @RequestMapping(value = "/getByShortCode", method = RequestMethod.POST)
+    @ResponseBody
+    public Ret<Apk> getByShortCode(@RequestBody Map<String, Object> params) {
+        String shortCode = MapUtil.getStr(params, "shortCode");
+        Apk data = baseBiz.getByShortCode(shortCode);
         return ok(data);
     }
 
