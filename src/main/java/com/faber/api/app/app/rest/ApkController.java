@@ -5,6 +5,7 @@ import com.faber.api.app.app.biz.ApkBiz;
 import com.faber.api.app.app.entity.Apk;
 import com.faber.core.annotation.FaLogBiz;
 import com.faber.core.annotation.FaLogOpr;
+import com.faber.core.annotation.LogNoRet;
 import com.faber.core.config.annotation.ApiToken;
 import com.faber.core.config.annotation.IgnoreUserToken;
 import com.faber.core.config.validator.validator.Vg;
@@ -53,6 +54,16 @@ public class ApkController extends BaseController<ApkBiz, Apk, Integer> {
     public Ret<Apk> getApkLastRelease(@PathVariable("id") Integer id) {
         Apk o = baseBiz.getById(id);
         return ok(o);
+    }
+
+    @IgnoreUserToken
+    @FaLogOpr(value = "最新版本下载数加一", crud = LogCrudEnum.C)
+    @LogNoRet
+    @RequestMapping(value = "/addLastDownloadNum/{id}", method = RequestMethod.GET)
+    @ResponseBody
+    public Ret<Boolean> addLastDownloadNum(@PathVariable("id") Integer id) {
+        baseBiz.addLastDownloadNum(id);
+        return ok();
     }
 
     @FaLogOpr(value = "API上传APK", crud = LogCrudEnum.C)

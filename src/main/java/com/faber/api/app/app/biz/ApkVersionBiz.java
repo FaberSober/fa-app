@@ -27,6 +27,11 @@ public class ApkVersionBiz extends BaseBiz<ApkVersionMapper,ApkVersion> {
     @Resource
     ApkBiz apkBiz;
 
+    /**
+     * 列出指定APP全部的版本信息
+     * @param appId
+     * @return
+     */
     public List<ApkVersion> listByAppId(Integer appId) {
         return lambdaQuery()
                 .eq(ApkVersion::getAppId, appId)
@@ -34,6 +39,10 @@ public class ApkVersionBiz extends BaseBiz<ApkVersionMapper,ApkVersion> {
                 .list();
     }
 
+    /**
+     * 指定版本号下载数+1
+     * @param id
+     */
     public void addDownloadNum(Integer id) {
         ApkVersion apkVersion = getById(id);
         if (apkVersion == null) throw new BuzzException("ID异常，请检查");
@@ -43,6 +52,19 @@ public class ApkVersionBiz extends BaseBiz<ApkVersionMapper,ApkVersion> {
 
         baseMapper.addDownloadNum(id);
         apkBiz.sumDownloadNum(apk.getId());
+    }
+
+    /**
+     * 获取指定app的最新版本信息
+     * @param appId {@link Apk#getId()}
+     * @return
+     */
+    public ApkVersion getLatestVersion(Integer appId) {
+        return getTop(
+                lambdaQuery()
+                        .eq(ApkVersion::getAppId, appId)
+                        .orderByDesc(ApkVersion::getId)
+        );
     }
 
 }

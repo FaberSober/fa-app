@@ -182,6 +182,22 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         return lambdaQuery().eq(Apk::getShortCode, shortCode).one();
     }
 
+    @Transactional
+    public void addLastDownloadNum(Integer id) {
+        // 最新版本下载数+1
+        ApkVersion apkVersion = apkVersionBiz.getLatestVersion(id);
+        if (apkVersion != null) {
+            apkVersionBiz.lambdaUpdate()
+                    .eq(ApkVersion::getId, apkVersion.getId())
+                    .set(ApkVersion::getDownloadNum, apkVersion.getDownloadNum() + 1)
+                    .update();
+        }
+
+        // 当前apk下载数+1
+        baseMapper.sumDownloadNum(id);
+    }
+
+
     public void sumDownloadNum(Integer id) {
         baseMapper.sumDownloadNum(id);
     }
