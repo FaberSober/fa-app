@@ -1,5 +1,7 @@
 package com.faber.api.app;
 
+import cn.hutool.http.useragent.UserAgent;
+import cn.hutool.http.useragent.UserAgentUtil;
 import net.dongliu.apk.parser.ApkFile;
 import net.dongliu.apk.parser.bean.ApkMeta;
 import net.dongliu.apk.parser.bean.IconFace;
@@ -97,6 +99,19 @@ public class AppInfoTest {
         } finally {
             zin.closeEntry();
         }
+    }
+
+    @Test
+    public void testGetAgentInfo() {
+        String agent = "Mozilla/5.0 (Linux; Android 10; EVR-AL00 Build/HUAWEIEVR-AL00; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/74.0.0.0 Mobile Safari/537.36 baiduboxapp/11.0.5.12 (Baidu; P1 10)";
+        UserAgent ua = UserAgentUtil.parse(agent);
+        System.out.println(ua.getBrowser());
+        System.out.println(ua.getEngine());
+        System.out.println(ua.getEngineVersion());
+        System.out.println(ua.getOs());
+        System.out.println(ua.getOsVersion());
+        System.out.println(ua.getPlatform());
+        System.out.println(ua.getVersion());
     }
 
 }
