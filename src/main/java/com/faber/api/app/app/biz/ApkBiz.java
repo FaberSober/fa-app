@@ -9,6 +9,7 @@ import com.faber.api.app.app.mapper.ApkMapper;
 import com.faber.api.base.admin.biz.FileSaveBiz;
 import com.faber.api.base.admin.entity.FileSave;
 import com.faber.core.exception.BuzzException;
+import com.faber.core.vo.msg.Ret;
 import com.faber.core.web.biz.BaseBiz;
 import jodd.io.FileUtil;
 import net.dongliu.apk.parser.ApkFile;
@@ -17,6 +18,7 @@ import net.dongliu.apk.parser.bean.IconFace;
 import org.apache.ibatis.annotations.Param;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
@@ -117,6 +119,7 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         ApkVersion apkVersion = new ApkVersion();
         BeanUtil.copyProperties(entity, apkVersion);
         apkVersion.setAppId(apk.getId());
+        apkVersion.setForceUpdate(false); // 默认不强制更新
         apkVersionBiz.save(apkVersion);
 
         return apk;
@@ -197,8 +200,23 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         baseMapper.sumDownloadNum(id);
     }
 
-
     public void sumDownloadNum(Integer id) {
         baseMapper.sumDownloadNum(id);
     }
+
+    /**
+     * 获取APK最新版本
+     *
+     * @param id 编号
+     * @return {@link Apk}
+     */
+    public Apk getApkLastRelease(Integer id) {
+        Apk apk = getById(id);
+
+        ApkVersion apkVersion = apkVersionBiz.getLatestVersion(id);
+        apk.setForceUpdate(apkVersion.getForceUpdate());
+
+        return apk;
+    }
+
 }

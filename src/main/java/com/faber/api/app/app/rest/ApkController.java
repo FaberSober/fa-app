@@ -52,7 +52,7 @@ public class ApkController extends BaseController<ApkBiz, Apk, Integer> {
     @ResponseBody
     @IgnoreUserToken
     public Ret<Apk> getApkLastRelease(@PathVariable("id") Integer id) {
-        Apk o = baseBiz.getById(id);
+        Apk o = baseBiz.getApkLastRelease(id);
         return ok(o);
     }
 

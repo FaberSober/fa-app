@@ -2,6 +2,7 @@ package com.faber.api.app.app.entity;
 
 import com.alibaba.excel.annotation.ExcelProperty;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.faber.core.annotation.FaModalName;
@@ -67,5 +68,9 @@ public class Apk extends BaseDelEntity {
 
     @ExcelProperty("最近版本信息")
     private String remark;
+
+    @TableField(exist = false)
+    @ExcelProperty("强制更新")
+    private Boolean forceUpdate;
 
 }
