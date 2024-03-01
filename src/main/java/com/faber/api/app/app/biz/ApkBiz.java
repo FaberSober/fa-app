@@ -173,6 +173,7 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         apkVersion.setSize(apkFileSave.getSize());
         apkVersion.setIconId(apkFileInfo.getIconId());
         apkVersion.setRemark(remark);
+        apkVersion.setForceUpdate(false);
         apkVersionBiz.save(apkVersion);
 
         return apk;
