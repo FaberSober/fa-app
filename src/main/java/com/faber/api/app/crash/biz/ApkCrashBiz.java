@@ -7,7 +7,7 @@ import com.faber.core.context.BaseContextHandler;
 import com.faber.core.web.biz.BaseBiz;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 
 /**
  * APP-APK崩溃日志表
