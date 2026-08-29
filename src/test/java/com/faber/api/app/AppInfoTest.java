@@ -6,7 +6,7 @@ import net.dongliu.apk.parser.ApkFile;
 import net.dongliu.apk.parser.bean.ApkMeta;
 import net.dongliu.apk.parser.bean.IconFace;
 import net.dongliu.apk.parser.bean.UseFeature;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.io.*;
 import java.util.List;

@@ -10,7 +10,7 @@ import com.faber.api.app.app.entity.ApkVersion;
 import com.faber.api.app.app.mapper.ApkVersionMapper;
 import com.faber.core.web.biz.BaseBiz;
 
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import java.util.List;
 
 /**
