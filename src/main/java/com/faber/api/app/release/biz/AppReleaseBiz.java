@@ -66,8 +66,7 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         }
         validateDraft(release, release.getId());
 
-        List<AppReleasePackage> packages = appReleasePackageBiz.listByReleaseId(id);
-        if (packages.isEmpty()) throw new BuzzException("发布版本至少需要一个发布包");
+        appReleasePackageBiz.validatePublishPackages(id);
 
         release.setStatus(AppReleaseConstants.STATUS_PUBLISHED);
         release.setPublishTime(new Date());
