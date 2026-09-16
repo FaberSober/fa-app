@@ -1,6 +1,6 @@
 # ADR：fa-app 应用版本管理与 Uni-app 增量发布
 
-- 状态：🟡进行中
+- 状态：✅已完成
 - 日期：2026-09-16
 - 范围：`fa-app` 后端、`mobile` Uni-app 客户端
 
@@ -38,7 +38,7 @@
 
 新增无需登录的公开检查接口，例如：`POST /api/app/app/release/check`。
 
-请求至少包含：`appCode`、`platform`、`currentVersionCode`、`channel`。首期 `appCode` 映射现有 `app_apk.short_code`。
+请求至少包含：`appCode`、`platform`、`currentVersionCode`、`channel`；支持可选 `deviceId` 参与灰度分流。首期 `appCode` 映射现有 `app_apk.short_code`。
 
 响应至少包含：
 
@@ -70,7 +70,14 @@
 - Android APP-PLUS 完整包下载校验后交由运行时安装；iOS IPA 不在应用内直接安装，使用 App Store 或企业分发渠道完成更新。
 - 微信小程序：不接入 WGT，使用 `uni.getUpdateManager` 按小程序平台审核和发布流程更新。
 - H5：使用 CDN 静态版本清单、缓存控制和刷新，不走客户端 WGT 安装。
-- 灰度发布、设备范围、复杂渠道规则和自动回滚先不作为首期必需能力；首期支持渠道字段和服务端撤回。
+- 复杂渠道规则仍不作为首期必需能力；当前支持稳定比例、设备白名单、渠道字段和服务端自动撤回。
+
+### 5. 灰度与回滚增强
+
+- `rolloutPercent` 使用 0-100 的稳定比例，按 `appId + versionCode + channel + deviceId` 计算固定分桶；未提供设备标识时不下发非全量版本。
+- `targetDeviceIds` 使用逗号或换行分隔的安装标识白名单，命中白名单时优先下发。
+- `autoRollback` 开启后，后台每分钟统计 Telemetry 生产环境同版本异常数；在配置窗口内达到 `rollbackErrorThreshold` 时自动撤回该版本。
+- 撤回只改变发布状态，不删除文件；公开检查接口自动跳过撤回版本并回退到上一可用发布包。
 
 ## 对现有 APK 模块的修正要求
 
@@ -90,6 +97,7 @@
 5. 接入 APP-PLUS WGT 上传、发布和摘要校验。
 6. 在 `fa-core-mobile` 实现更新基础能力，在 `fa-base-mobile` 接入业务交互。
 7. 联调完整包回退、WGT 基准版本不匹配、撤回和失败恢复场景。
+8. 实现稳定灰度分流、设备白名单和基于 Telemetry 异常阈值的自动回滚。
 
 ## 验收标准
 
@@ -100,6 +108,7 @@
 - 原生变更不会误标为 WGT 更新。
 - MySQL 和 PostgreSQL DDL 可分别执行，字段类型与 Java 实体一致。
 - 小程序和 H5 更新策略有明确的非 WGT 处理路径。
+- 灰度设备命中结果稳定，撤回版本不再下发；生产异常达到阈值后可自动撤回并回退到上一发布版本。
 
 ## 功能清单
 
@@ -115,5 +124,5 @@
 | `mobile Base` | 更新业务集成 | 应用标识、渠道、更新弹窗、强制更新和说明 | 执行开发 | ✅已完成 |
 | `mobile` | 完整包回退 | WGT 不匹配或原生变更时转完整 APK/IPA | 执行开发 | ✅已完成 |
 | 跨端发布 | 小程序和 H5 适配 | 小程序走平台发布，H5 走静态资源/CDN 发布 | 执行开发 | ✅已完成 |
-| `fa-app` | 灰度与回滚增强 | 灰度规则、设备范围、自动回滚 | 留作未来版本规划 | 🕒待处理 |
+| `fa-app` | 灰度与回滚增强 | 灰度规则、设备范围、自动回滚 | 执行开发 | ✅已完成 |
 | `uni-app` | 自定义差分包算法 | 自研 bsdiff 等二进制增量算法 | 留作未来版本规划 | ⚪已取消 |

@@ -22,6 +22,9 @@ public class AppReleaseCheckReq {
     @Min(0)
     private Long currentVersionCode;
 
+    @Size(max = 128)
+    private String deviceId;
+
     @NotBlank
     @Size(max = 32)
     private String channel = "stable";

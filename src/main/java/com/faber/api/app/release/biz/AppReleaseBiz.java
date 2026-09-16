@@ -1,7 +1,13 @@
 package com.faber.api.app.release.biz;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.faber.api.app.app.biz.ApkBiz;
 import com.faber.api.app.app.entity.Apk;
+import com.faber.api.base.telemetry.biz.TelemetryAppBiz;
+import com.faber.api.base.telemetry.entity.ClientErrorEvent;
+import com.faber.api.base.telemetry.entity.TelemetryApp;
+import com.faber.api.base.telemetry.enums.TelemetryClientTypeEnum;
+import com.faber.api.base.telemetry.mapper.ClientErrorEventMapper;
 import com.faber.api.base.admin.biz.FileSaveBiz;
 import com.faber.api.base.admin.entity.FileSave;
 import com.faber.api.app.release.AppReleaseConstants;
@@ -13,6 +19,8 @@ import com.faber.api.app.release.vo.ret.AppReleaseCheckRet;
 import com.faber.core.exception.BuzzException;
 import com.faber.core.web.biz.BaseBiz;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +28,7 @@ import java.util.Date;
 import java.util.List;
 
 /** 应用通用版本发布记录业务。 */
+@Slf4j
 @Service
 public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
@@ -32,11 +41,17 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
     @Resource
     AppReleasePackageBiz appReleasePackageBiz;
 
+    @Resource
+    TelemetryAppBiz telemetryAppBiz;
+
+    @Resource
+    ClientErrorEventMapper clientErrorEventMapper;
+
     @Override
     public boolean save(AppRelease entity) {
+        normalizeDefaults(entity);
         validateDraft(entity, null);
         entity.setStatus(AppReleaseConstants.STATUS_DRAFT);
-        entity.setForceUpdate(Boolean.TRUE.equals(entity.getForceUpdate()));
         entity.setPublishTime(null);
         return super.save(entity);
     }
@@ -52,6 +67,7 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
             throw new BuzzException("发布状态请使用发布或撤回接口修改");
         }
 
+        normalizeDefaults(entity);
         validateDraft(entity, entity.getId());
         entity.setStatus(AppReleaseConstants.STATUS_DRAFT);
         entity.setPublishTime(null);
@@ -105,6 +121,7 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
                 .list();
 
         for (AppRelease release : releases) {
+            if (!matchesDeviceScope(release, request.getDeviceId())) continue;
             List<AppReleasePackage> packages = appReleasePackageBiz.listByReleaseId(release.getId());
             AppReleasePackage releasePackage = selectPackage(platform, currentVersionCode, release, packages);
             if (releasePackage == null) continue;
@@ -116,6 +133,31 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
                     currentVersionCode < defaultValue(release.getMinSupportedVersionCode(), 0L));
         }
         return AppReleaseCheckRet.noUpdate();
+    }
+
+    /** 每分钟检查启用自动回滚的发布版本，达到生产异常阈值后撤回版本。 */
+    @Scheduled(fixedDelayString = "${fa.app.release.rollback-check-interval-ms:60000}")
+    @Transactional(rollbackFor = Exception.class)
+    public void checkAutoRollback() {
+        List<AppRelease> releases = lambdaQuery()
+                .eq(AppRelease::getStatus, AppReleaseConstants.STATUS_PUBLISHED)
+                .eq(AppRelease::getAutoRollback, true)
+                .list();
+        Date now = new Date();
+        for (AppRelease release : releases) {
+            long errorCount = countProductionErrors(release, now);
+            int threshold = defaultValue(release.getRollbackErrorThreshold(), 10);
+            if (errorCount < threshold) continue;
+
+            try {
+                revoke(release.getId());
+                log.warn("应用版本达到自动回滚异常阈值，已撤回。releaseId={}, versionCode={}, errorCount={}, threshold={}",
+                        release.getId(), release.getVersionCode(), errorCount, threshold);
+            } catch (RuntimeException error) {
+                log.warn("应用版本自动回滚失败。releaseId={}, versionCode={}",
+                        release.getId(), release.getVersionCode(), error);
+            }
+        }
     }
 
     @Override
@@ -151,6 +193,19 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
                 || entity.getMinSupportedVersionCode() > entity.getVersionCode())) {
             throw new BuzzException("最低支持版本号必须是正整数且不能大于目标版本号");
         }
+        int rolloutPercent = defaultValue(entity.getRolloutPercent(), 100);
+        if (rolloutPercent < 0 || rolloutPercent > 100) {
+            throw new BuzzException("灰度比例必须在0到100之间");
+        }
+        validateTargetDeviceIds(entity.getTargetDeviceIds());
+        int rollbackErrorThreshold = defaultValue(entity.getRollbackErrorThreshold(), 10);
+        int rollbackWindowMinutes = defaultValue(entity.getRollbackWindowMinutes(), 15);
+        if (rollbackErrorThreshold < 1 || rollbackErrorThreshold > 1_000_000) {
+            throw new BuzzException("自动回滚异常阈值必须在1到1000000之间");
+        }
+        if (rollbackWindowMinutes < 1 || rollbackWindowMinutes > 1_440) {
+            throw new BuzzException("自动回滚窗口必须在1到1440分钟之间");
+        }
 
         long count = lambdaQuery()
                 .eq(AppRelease::getAppId, entity.getAppId())
@@ -175,6 +230,69 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         if (request.getChannel() == null || request.getChannel().isBlank()) {
             throw new BuzzException("发布渠道不能为空");
         }
+        if (request.getDeviceId() != null && request.getDeviceId().length() > 128) {
+            throw new BuzzException("设备标识长度不能超过128");
+        }
+    }
+
+    private void normalizeDefaults(AppRelease entity) {
+        entity.setForceUpdate(Boolean.TRUE.equals(entity.getForceUpdate()));
+        entity.setRolloutPercent(defaultValue(entity.getRolloutPercent(), 100));
+        entity.setAutoRollback(Boolean.TRUE.equals(entity.getAutoRollback()));
+        entity.setRollbackErrorThreshold(defaultValue(entity.getRollbackErrorThreshold(), 10));
+        entity.setRollbackWindowMinutes(defaultValue(entity.getRollbackWindowMinutes(), 15));
+    }
+
+    private boolean matchesDeviceScope(AppRelease release, String deviceId) {
+        String normalizedDeviceId = trimToNull(deviceId);
+        String targetDeviceIds = trimToNull(release.getTargetDeviceIds());
+        if (targetDeviceIds != null) {
+            if (normalizedDeviceId == null) return false;
+            for (String targetDeviceId : targetDeviceIds.split("[,\\s]+")) {
+                if (normalizedDeviceId.equals(targetDeviceId)) return true;
+            }
+            return false;
+        }
+
+        int rolloutPercent = defaultValue(release.getRolloutPercent(), 100);
+        if (rolloutPercent >= 100) return true;
+        if (rolloutPercent <= 0 || normalizedDeviceId == null) return false;
+
+        String seed = release.getAppId() + "|" + release.getVersionCode() + "|"
+                + release.getChannel() + "|" + normalizedDeviceId;
+        return Math.floorMod(seed.hashCode(), 100) < rolloutPercent;
+    }
+
+    private void validateTargetDeviceIds(String targetDeviceIds) {
+        if (targetDeviceIds == null || targetDeviceIds.isBlank()) return;
+        if (targetDeviceIds.length() > 4_000) throw new BuzzException("设备范围配置不能超过4000个字符");
+        for (String deviceId : targetDeviceIds.split("[,\\s]+")) {
+            if (deviceId.length() > 128) throw new BuzzException("设备标识长度不能超过128");
+        }
+    }
+
+    private long countProductionErrors(AppRelease release, Date now) {
+        Apk app = apkBiz.getById(release.getAppId());
+        if (app == null || app.getShortCode() == null || app.getShortCode().isBlank()) return 0;
+
+        TelemetryApp telemetryApp = telemetryAppBiz.lambdaQuery()
+                .eq(TelemetryApp::getAppCode, app.getShortCode())
+                .eq(TelemetryApp::getClientType, TelemetryClientTypeEnum.MOBILE)
+                .one();
+        if (telemetryApp == null) return 0;
+
+        long windowMillis = defaultValue(release.getRollbackWindowMinutes(), 15) * 60_000L;
+        Date startTime = new Date(now.getTime() - windowMillis);
+        if (release.getPublishTime() != null && release.getPublishTime().after(startTime)) {
+            startTime = release.getPublishTime();
+        }
+        return clientErrorEventMapper.selectCount(new LambdaQueryWrapper<ClientErrorEvent>()
+                .eq(ClientErrorEvent::getAppId, telemetryApp.getId())
+                .eq(ClientErrorEvent::getClientType, TelemetryClientTypeEnum.MOBILE)
+                .eq(ClientErrorEvent::getEnvironment, "production")
+                .eq(ClientErrorEvent::getRelease, release.getVersionName())
+                .ge(ClientErrorEvent::getOccurTime, startTime)
+                .lt(ClientErrorEvent::getOccurTime, now));
     }
 
     private AppReleasePackage selectPackage(String platform, long currentVersionCode,
@@ -230,5 +348,14 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
     private long defaultValue(Long value, long defaultValue) {
         return value == null ? defaultValue : value;
+    }
+
+    private int defaultValue(Integer value, int defaultValue) {
+        return value == null ? defaultValue : value;
+    }
+
+    private String trimToNull(String value) {
+        if (value == null || value.isBlank()) return null;
+        return value.trim();
     }
 }

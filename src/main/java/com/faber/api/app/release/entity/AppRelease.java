@@ -7,8 +7,11 @@ import com.faber.core.annotation.FaModalName;
 import com.faber.core.annotation.SqlEquals;
 import com.faber.core.annotation.SqlSearch;
 import com.faber.core.bean.BaseDelEntity;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -49,6 +52,26 @@ public class AppRelease extends BaseDelEntity {
     private Boolean forceUpdate = false;
 
     private Long minSupportedVersionCode;
+
+    /** 按安装标识稳定分流的百分比，100表示全量。 */
+    @Min(0)
+    @Max(100)
+    private Integer rolloutPercent = 100;
+
+    /** 逗号或换行分隔的安装标识白名单。 */
+    @Size(max = 4000)
+    private String targetDeviceIds;
+
+    /** 是否按生产环境异常数自动撤回当前版本。 */
+    private Boolean autoRollback = false;
+
+    @Min(1)
+    @Max(1_000_000)
+    private Integer rollbackErrorThreshold = 10;
+
+    @Min(1)
+    @Max(1_440)
+    private Integer rollbackWindowMinutes = 15;
 
     private String releaseNote;
 
