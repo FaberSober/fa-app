@@ -1,10 +1,15 @@
 package com.faber.api.app.release.biz;
 
 import com.faber.api.app.app.biz.ApkBiz;
+import com.faber.api.app.app.entity.Apk;
+import com.faber.api.base.admin.biz.FileSaveBiz;
+import com.faber.api.base.admin.entity.FileSave;
 import com.faber.api.app.release.AppReleaseConstants;
 import com.faber.api.app.release.entity.AppRelease;
 import com.faber.api.app.release.entity.AppReleasePackage;
 import com.faber.api.app.release.mapper.AppReleaseMapper;
+import com.faber.api.app.release.vo.req.AppReleaseCheckReq;
+import com.faber.api.app.release.vo.ret.AppReleaseCheckRet;
 import com.faber.core.exception.BuzzException;
 import com.faber.core.web.biz.BaseBiz;
 import jakarta.annotation.Resource;
@@ -20,6 +25,9 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
     @Resource
     ApkBiz apkBiz;
+
+    @Resource
+    FileSaveBiz fileSaveBiz;
 
     @Resource
     AppReleasePackageBiz appReleasePackageBiz;
@@ -79,6 +87,38 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         return release;
     }
 
+    public AppReleaseCheckRet check(AppReleaseCheckReq request) {
+        validateCheckRequest(request);
+
+        Apk app = apkBiz.getByShortCode(request.getAppCode().trim());
+        String platform = request.getPlatform().trim();
+        String channel = request.getChannel().trim();
+        long currentVersionCode = request.getCurrentVersionCode();
+        if (!AppReleaseConstants.PLATFORMS.contains(platform)) throw new BuzzException("不支持的发布平台");
+
+        List<AppRelease> releases = lambdaQuery()
+                .eq(AppRelease::getAppId, app.getId())
+                .eq(AppRelease::getChannel, channel)
+                .eq(AppRelease::getStatus, AppReleaseConstants.STATUS_PUBLISHED)
+                .gt(AppRelease::getVersionCode, currentVersionCode)
+                .orderByDesc(AppRelease::getVersionCode)
+                .orderByDesc(AppRelease::getId)
+                .list();
+
+        for (AppRelease release : releases) {
+            List<AppReleasePackage> packages = appReleasePackageBiz.listByReleaseId(release.getId());
+            AppReleasePackage releasePackage = selectPackage(platform, currentVersionCode, release, packages);
+            if (releasePackage == null) continue;
+
+            FileSave fileSave = fileSaveBiz.getByIdWithCache(releasePackage.getFileId());
+            if (fileSave == null) continue;
+
+            return toCheckResult(release, releasePackage, fileSave,
+                    currentVersionCode < defaultValue(release.getMinSupportedVersionCode(), 0L));
+        }
+        return AppReleaseCheckRet.noUpdate();
+    }
+
     @Override
     public boolean removeById(java.io.Serializable id) {
         AppRelease release = require((Long) id);
@@ -120,5 +160,76 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
                 .ne(excludeId != null, AppRelease::getId, excludeId)
                 .count();
         if (count > 0) throw new BuzzException("同一应用、版本号和渠道的发布记录已存在");
+    }
+
+    private void validateCheckRequest(AppReleaseCheckReq request) {
+        if (request == null) throw new BuzzException("版本检查请求不能为空");
+        if (request.getAppCode() == null || request.getAppCode().isBlank()) {
+            throw new BuzzException("应用标识不能为空");
+        }
+        if (request.getPlatform() == null || request.getPlatform().isBlank()) {
+            throw new BuzzException("发布平台不能为空");
+        }
+        if (request.getCurrentVersionCode() == null || request.getCurrentVersionCode() < 0) {
+            throw new BuzzException("当前版本号不能小于0");
+        }
+        if (request.getChannel() == null || request.getChannel().isBlank()) {
+            throw new BuzzException("发布渠道不能为空");
+        }
+    }
+
+    private AppReleasePackage selectPackage(String platform, long currentVersionCode,
+                                            AppRelease release, List<AppReleasePackage> packages) {
+        boolean forceFull = release.getMinSupportedVersionCode() != null
+                && currentVersionCode < release.getMinSupportedVersionCode();
+        if (forceFull) return findFullPackage(platform, packages);
+
+        if (AppReleaseConstants.PLATFORM_APP_PLUS.equals(platform)) {
+            AppReleasePackage wgt = findPackage(packages, AppReleaseConstants.PACKAGE_WGT, currentVersionCode);
+            if (wgt != null) return wgt;
+        }
+        return findFullPackage(platform, packages);
+    }
+
+    private AppReleasePackage findFullPackage(String platform, List<AppReleasePackage> packages) {
+        String packageType = switch (platform) {
+            case AppReleaseConstants.PLATFORM_ANDROID -> AppReleaseConstants.PACKAGE_APK;
+            case AppReleaseConstants.PLATFORM_IOS -> AppReleaseConstants.PACKAGE_IPA;
+            default -> AppReleaseConstants.PACKAGE_FULL;
+        };
+        AppReleasePackage packageInfo = findPackage(packages, packageType, null);
+        return packageInfo != null ? packageInfo : findPackage(packages, AppReleaseConstants.PACKAGE_FULL, null);
+    }
+
+    private AppReleasePackage findPackage(List<AppReleasePackage> packages, String packageType, Long baseVersionCode) {
+        return packages.stream()
+                .filter(item -> packageType.equals(item.getPackageType()))
+                .filter(item -> baseVersionCode == null || baseVersionCode.equals(item.getBaseVersionCode()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private AppReleaseCheckRet toCheckResult(AppRelease release, AppReleasePackage releasePackage,
+                                             FileSave fileSave, boolean forceFull) {
+        AppReleaseCheckRet result = new AppReleaseCheckRet();
+        result.setHasUpdate(true);
+        result.setUpdateType(AppReleaseConstants.PACKAGE_WGT.equals(releasePackage.getPackageType())
+                ? AppReleaseConstants.UPDATE_WGT : AppReleaseConstants.UPDATE_FULL);
+        result.setReleaseId(release.getId());
+        result.setVersionCode(release.getVersionCode());
+        result.setVersionName(release.getVersionName());
+        result.setBaseVersionCode(releasePackage.getBaseVersionCode());
+        result.setForceUpdate(forceFull || Boolean.TRUE.equals(release.getForceUpdate()));
+        result.setMinSupportedVersionCode(release.getMinSupportedVersionCode());
+        result.setFileId(releasePackage.getFileId());
+        result.setDownloadUrl(fileSaveBiz.getFileUrl(releasePackage.getFileId()));
+        result.setSize(releasePackage.getSize() != null ? releasePackage.getSize() : fileSave.getSize());
+        result.setSha256(releasePackage.getSha256());
+        result.setReleaseNote(release.getReleaseNote());
+        return result;
+    }
+
+    private long defaultValue(Long value, long defaultValue) {
+        return value == null ? defaultValue : value;
     }
 }

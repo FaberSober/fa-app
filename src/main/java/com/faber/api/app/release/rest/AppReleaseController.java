@@ -4,19 +4,33 @@ import com.faber.api.app.release.biz.AppReleaseBiz;
 import com.faber.api.app.release.entity.AppRelease;
 import com.faber.core.annotation.FaLogBiz;
 import com.faber.core.annotation.FaLogOpr;
+import com.faber.core.annotation.LogNoRet;
+import com.faber.core.config.annotation.IgnoreUserToken;
 import com.faber.core.enums.LogCrudEnum;
 import com.faber.core.vo.msg.Ret;
 import com.faber.core.web.rest.BaseController;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
+
+import com.faber.api.app.release.vo.req.AppReleaseCheckReq;
+import com.faber.api.app.release.vo.ret.AppReleaseCheckRet;
 
 /** 应用通用版本发布管理接口。 */
 @FaLogBiz("应用版本发布")
 @RestController
 @RequestMapping("/api/app/app/release")
 public class AppReleaseController extends BaseController<AppReleaseBiz, AppRelease, Long> {
+
+    @IgnoreUserToken
+    @LogNoRet
+    @PostMapping("/check")
+    public Ret<AppReleaseCheckRet> check(@Validated @RequestBody AppReleaseCheckReq request) {
+        return ok(baseBiz.check(request));
+    }
 
     @FaLogOpr(value = "发布应用版本", crud = LogCrudEnum.U)
     @PostMapping("/publish/{id}")

@@ -20,6 +20,10 @@ public final class AppReleaseConstants {
     public static final String PACKAGE_WGT = "WGT";
     public static final String PACKAGE_FULL = "FULL";
 
+    public static final String UPDATE_NONE = "NONE";
+    public static final String UPDATE_WGT = "WGT";
+    public static final String UPDATE_FULL = "FULL";
+
     public static final Set<String> STATUSES = Set.of(STATUS_DRAFT, STATUS_PUBLISHED, STATUS_REVOKED);
     public static final Set<String> PLATFORMS = Set.of(
             PLATFORM_ANDROID, PLATFORM_IOS, PLATFORM_APP_PLUS, PLATFORM_MP_WEIXIN, PLATFORM_H5

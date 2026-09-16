@@ -38,7 +38,7 @@
 
 新增无需登录的公开检查接口，例如：`POST /api/app/app/release/check`。
 
-请求至少包含：`appCode`、`platform`、`currentVersionCode`、`channel`。
+请求至少包含：`appCode`、`platform`、`currentVersionCode`、`channel`。首期 `appCode` 映射现有 `app_apk.short_code`。
 
 响应至少包含：
 
@@ -108,7 +108,7 @@
 | `fa-app` | APK 管理正确性修正 | 事务、版本校验、排序、空值和唯一性判断 | 执行开发 | ✅已完成 |
 | `fa-app` | 通用发布模型 | 新增版本发布和平台包信息模型 | 执行开发 | ✅已完成 |
 | `fa-app` | 发布生命周期 | 草稿、发布、撤回、渠道、最低支持版本、强制更新 | 执行开发 | ✅已完成 |
-| `fa-app` | 公开版本检查接口 | 按应用、平台、渠道和当前版本选择 WGT 或完整包 | 执行开发 | 🕒待处理 |
+| `fa-app` | 公开版本检查接口 | 按应用、平台、渠道和当前版本选择 WGT 或完整包 | 执行开发 | ✅已完成 |
 | `fa-app` | APP-PLUS 包发布 | 支持 WGT 上传、基准版本、大小和 SHA-256 | 执行开发 | 🕒待处理 |
 | `mobile Core` | 更新基础能力 | 版本读取、检查、下载、校验、安装锁和失败保护 | 执行开发 | 🕒待处理 |
 | `mobile Base` | 更新业务集成 | 应用标识、渠道、更新弹窗、强制更新和说明 | 执行开发 | 🕒待处理 |
