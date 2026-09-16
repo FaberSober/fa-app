@@ -9,16 +9,13 @@ import com.faber.api.app.app.mapper.ApkMapper;
 import com.faber.api.base.admin.biz.FileSaveBiz;
 import com.faber.api.base.admin.entity.FileSave;
 import com.faber.core.exception.BuzzException;
-import com.faber.core.vo.msg.Ret;
 import com.faber.core.web.biz.BaseBiz;
 import jodd.io.FileUtil;
 import net.dongliu.apk.parser.ApkFile;
 import net.dongliu.apk.parser.bean.ApkMeta;
 import net.dongliu.apk.parser.bean.IconFace;
-import org.apache.ibatis.annotations.Param;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.annotation.Resource;
@@ -82,28 +79,24 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         return null;
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public Apk create(Apk entity) {
         FileSave apkFileSave = fileSaveBiz.getById(entity.getFileId());
+        validateApkFile(entity.getFileId(), apkFileSave);
         entity.setSize(apkFileSave.getSize());
 
         // step 1: update apk info
         Apk apk = this.getApkByApplicationId(entity.getApplicationId());
         if (apk == null) {
-            // check shortCode unique
-            long count = lambdaQuery().eq(Apk::getShortCode, entity.getShortCode()).count();
-            if (count > 0) throw new BuzzException("有多个相同短链的应用，请更换短链");
+            validateVersionCode(entity.getVersionCode());
+            validateShortCodeUnique(entity.getShortCode(), null);
 
             // create apk
-            super.save(entity);
+            if (!super.save(entity)) throw new BuzzException("保存APP信息失败，请重试");
             apk = entity;
         } else {
-            // update
-            // check shortCode unique
-            long count = lambdaQuery()
-                    .eq(Apk::getShortCode, entity.getShortCode())
-                    .ne(Apk::getId, apk.getId())
-                    .count();
-            if (count > 1) throw new BuzzException("该短链已存在，请更换短链");
+            validateVersionIncrease(apk, entity.getVersionCode());
+            validateShortCodeUnique(entity.getShortCode(), apk.getId());
 
             apk.setName(entity.getName());
             apk.setVersionCode(entity.getVersionCode());
@@ -111,8 +104,9 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
             apk.setFileId(entity.getFileId());
             apk.setSize(apkFileSave.getSize());
             apk.setIconId(entity.getIconId());
+            apk.setShortCode(entity.getShortCode());
             apk.setRemark(entity.getRemark());
-            super.updateById(apk);
+            if (!super.updateById(apk)) throw new BuzzException("更新APP信息失败，请重试");
         }
 
         // step 2: add apk version info
@@ -127,11 +121,7 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
 
     @Override
     public boolean updateById(Apk entity) {
-        long count = lambdaQuery()
-                .eq(Apk::getShortCode, entity.getShortCode())
-                .ne(Apk::getId, entity.getId())
-                .count();
-        if (count > 1) throw new BuzzException("该短链已存在，请更换短链");
+        validateShortCodeUnique(entity.getShortCode(), entity.getId());
         return super.updateById(entity);
     }
 
@@ -151,6 +141,7 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         if (ObjUtil.notEqual(apkFileInfo.getApplicationId(), apk.getApplicationId())) {
             throw new BuzzException("ApplicationId Not Equal, Please Check.");
         }
+        validateVersionIncrease(apk, apkFileInfo.getVersionCode());
 
         // 1. update apk info
         apk.setName(apkFileInfo.getName());
@@ -191,10 +182,8 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         // 最新版本下载数+1
         ApkVersion apkVersion = apkVersionBiz.getLatestVersion(id);
         if (apkVersion != null) {
-            apkVersionBiz.lambdaUpdate()
-                    .eq(ApkVersion::getId, apkVersion.getId())
-                    .set(ApkVersion::getDownloadNum, apkVersion.getDownloadNum() + 1)
-                    .update();
+            apkVersionBiz.addDownloadNum(apkVersion.getId());
+            return;
         }
 
         // 当前apk下载数+1
@@ -213,11 +202,49 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
      */
     public Apk getApkLastRelease(Integer id) {
         Apk apk = getById(id);
+        if (apk == null) throw new BuzzException("APP ID异常，请检查");
 
         ApkVersion apkVersion = apkVersionBiz.getLatestVersion(id);
-        apk.setForceUpdate(apkVersion.getForceUpdate());
+        apk.setForceUpdate(apkVersion != null && Boolean.TRUE.equals(apkVersion.getForceUpdate()));
 
         return apk;
+    }
+
+    private void validateApkFile(String fileId, FileSave fileSave) {
+        if (fileSave == null) throw new BuzzException("APK文件不存在，请重新上传");
+        if (fileSave.getSize() == null || fileSave.getSize() <= 0) {
+            throw new BuzzException("APK文件大小异常，请重新上传");
+        }
+        if (fileId == null || fileId.isBlank()) throw new BuzzException("APK文件ID不能为空");
+    }
+
+    private void validateVersionCode(Long versionCode) {
+        if (versionCode == null || versionCode < 1) {
+            throw new BuzzException("版本号必须是正整数");
+        }
+    }
+
+    private void validateVersionIncrease(Apk apk, Long versionCode) {
+        validateVersionCode(versionCode);
+        if (apk.getVersionCode() != null && versionCode <= apk.getVersionCode()) {
+            throw new BuzzException("新版本号必须大于当前版本号");
+        }
+
+        ApkVersion latestVersion = apkVersionBiz.getLatestVersion(apk.getId());
+        if (latestVersion != null && latestVersion.getVersionCode() != null
+                && versionCode <= latestVersion.getVersionCode()) {
+            throw new BuzzException("新版本号必须大于历史最新版本号");
+        }
+    }
+
+    private void validateShortCodeUnique(String shortCode, Integer excludeId) {
+        if (shortCode == null || shortCode.isBlank()) throw new BuzzException("短链不能为空");
+
+        long count = lambdaQuery()
+                .eq(Apk::getShortCode, shortCode)
+                .ne(excludeId != null, Apk::getId, excludeId)
+                .count();
+        if (count > 0) throw new BuzzException("该短链已存在，请更换短链");
     }
 
 }

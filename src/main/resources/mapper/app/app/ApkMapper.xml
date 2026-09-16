@@ -23,10 +23,13 @@
     </resultMap>
 
     <update id="sumDownloadNum" parameterType="map">
-        UPDATE app_apk t SET t.download_num = (
-            SELECT IFNULL(SUM(b.download_num), 0) FROM app_apk_version b WHERE b.app_id = t.id
+        UPDATE app_apk
+        SET download_num = (
+            SELECT COALESCE(SUM(b.download_num), 0)
+            FROM app_apk_version b
+            WHERE b.app_id = app_apk.id
         )
-        WHERE t.id = #{id}
+        WHERE id = #{id}
     </update>
 
 </mapper>
