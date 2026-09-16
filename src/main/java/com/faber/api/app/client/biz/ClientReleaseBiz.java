@@ -17,6 +17,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.Date;
 import java.util.List;
@@ -168,6 +169,27 @@ public class ClientReleaseBiz extends BaseBiz<ClientReleaseMapper, ClientRelease
             return result;
         }
         return null;
+    }
+
+    public void download(Long releaseId, String target) throws IOException {
+        ClientRelease release = require(releaseId);
+        if (!ClientReleaseConstants.STATUS_PUBLISHED.equals(release.getStatus())) {
+            throw new BuzzException("只有已发布版本可以下载");
+        }
+
+        String[] targetParts = resolveTarget(target);
+        ClientReleaseArtifact artifact = clientReleaseArtifactBiz.lambdaQuery()
+                .eq(ClientReleaseArtifact::getReleaseId, releaseId)
+                .eq(ClientReleaseArtifact::getPlatform, targetParts[0])
+                .eq(ClientReleaseArtifact::getArch, targetParts[1])
+                .one();
+        if (artifact == null) throw new BuzzException("该版本不存在匹配的安装包");
+        if (artifact.getFileId() == null || artifact.getFileId().isBlank()
+                || fileSaveBiz.getByIdWithCache(artifact.getFileId()) == null) {
+            throw new BuzzException("安装包文件不存在");
+        }
+
+        fileSaveBiz.downloadFileById(artifact.getFileId());
     }
 
     @Override
