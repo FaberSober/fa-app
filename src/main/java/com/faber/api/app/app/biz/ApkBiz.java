@@ -13,7 +13,9 @@ import com.faber.core.web.biz.BaseBiz;
 import jodd.io.FileUtil;
 import net.dongliu.apk.parser.ApkFile;
 import net.dongliu.apk.parser.bean.ApkMeta;
+import net.dongliu.apk.parser.bean.Icon;
 import net.dongliu.apk.parser.bean.IconFace;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -22,6 +24,9 @@ import jakarta.annotation.Resource;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * APP-APK表
@@ -30,8 +35,12 @@ import java.util.List;
  * @email faberxu@gmail.com
  * @date 2023-01-18 20:31:39
  */
+@Slf4j
 @Service
 public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
+
+    private static final Pattern ADAPTIVE_ICON_FOREGROUND_PATTERN =
+            Pattern.compile("<foreground\\b[^>]*\\bdrawable=\"([^\"]+)\"", Pattern.CASE_INSENSITIVE);
 
     @Resource
     FileSaveBiz fileSaveBiz;
@@ -40,34 +49,82 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
     ApkVersionBiz apkVersionBiz;
 
     public Apk getApkInfo(String fileId) throws IOException {
-        File file = fileSaveBiz.getFileObj(fileId);
-        ApkFile apkFile = new ApkFile(file);
-        ApkMeta apkMeta = apkFile.getApkMeta();
+        FileSave apkFileSave = fileSaveBiz.getById(fileId);
+        File file = fileSaveBiz.getFileObj(apkFileSave);
+        try {
+            try (ApkFile apkFile = new ApkFile(file)) {
+                ApkMeta apkMeta = apkFile.getApkMeta();
 
-        Apk apkInfo = new Apk();
-        apkInfo.setFileId(fileId);
-        apkInfo.setName(apkMeta.getName());
-        apkInfo.setApplicationId(apkMeta.getPackageName());
-        apkInfo.setVersionCode(apkMeta.getVersionCode());
-        apkInfo.setVersionName(apkMeta.getVersionName());
+                Apk apkInfo = new Apk();
+                apkInfo.setFileId(fileId);
+                apkInfo.setName(apkMeta.getName());
+                apkInfo.setApplicationId(apkMeta.getPackageName());
+                apkInfo.setVersionCode(apkMeta.getVersionCode());
+                apkInfo.setVersionName(apkMeta.getVersionName());
+
+                IconFace icon = getApkIcon(apkFile);
+                if (icon != null && icon.getData() != null) {
+                    File iconFile = File.createTempFile("apk-icon-", ".png");
+                    try {
+                        FileUtil.writeBytes(iconFile, icon.getData());
+                        FileSave fileSave = fileSaveBiz.upload(iconFile);
+                        apkInfo.setIconId(fileSave.getId());
+                    } finally {
+                        deleteTempFile(iconFile);
+                    }
+                }
+
+                Apk apk = this.getApkByApplicationId(apkInfo.getApplicationId());
+                if (apk != null) {
+                    apkInfo.setShortCode(apk.getShortCode());
+                } else {
+                    apkInfo.setShortCode(RandomUtil.randomString(4));
+                }
+
+                return apkInfo;
+            }
+        } finally {
+            deleteRemoteTempFile(apkFileSave, file);
+        }
+    }
+
+    /**
+     * 只读取清单选中的图标。自适应图标只解析选中的 XML 和前景图，特殊格式再回退到全量解析。
+     */
+    private IconFace getApkIcon(ApkFile apkFile) throws IOException {
+        Icon icon = apkFile.getIconFile();
+        if (icon == null || icon.getPath() == null
+                || !icon.getPath().toLowerCase(Locale.ROOT).endsWith(".xml")) {
+            return icon;
+        }
+
+        String adaptiveIconXml = apkFile.transBinaryXml(icon.getPath());
+        if (adaptiveIconXml != null) {
+            Matcher matcher = ADAPTIVE_ICON_FOREGROUND_PATTERN.matcher(adaptiveIconXml);
+            if (matcher.find()) {
+                String foregroundPath = matcher.group(1);
+                byte[] foregroundData = apkFile.getFileData(foregroundPath);
+                if (foregroundData != null) {
+                    return new Icon(foregroundPath, 0, foregroundData);
+                }
+            }
+        }
 
         List<IconFace> icons = apkFile.getAllIcons();
-        if (icons != null && !icons.isEmpty()) {
-            IconFace icon = icons.get(0);
-            File iconFile = FileUtil.createTempFile("icon", ".png", FileUtil.createTempDirectory());
-            FileUtil.writeBytes(iconFile, icon.getData());
-            FileSave fileSave = fileSaveBiz.upload(iconFile);
-            apkInfo.setIconId(fileSave.getId());
-        }
+        return icons == null || icons.isEmpty() ? null : icons.get(0);
+    }
 
-        Apk apk = this.getApkByApplicationId(apkInfo.getApplicationId());
-        if (apk != null) {
-            apkInfo.setShortCode(apk.getShortCode());
-        } else {
-            apkInfo.setShortCode(RandomUtil.randomString(4));
+    private void deleteTempFile(File file) {
+        if (file != null && file.exists() && !file.delete()) {
+            log.warn("清理APK图标临时文件失败: {}", file.getAbsolutePath());
         }
+    }
 
-        return apkInfo;
+    private void deleteRemoteTempFile(FileSave fileSave, File file) {
+        if (fileSave != null && fileSave.getPlatform() != null
+                && !fileSave.getPlatform().startsWith("local-")) {
+            deleteTempFile(file);
+        }
     }
 
     public Apk getApkByApplicationId(String applicationId) {
