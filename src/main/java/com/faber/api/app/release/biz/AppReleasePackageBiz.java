@@ -7,10 +7,16 @@ import com.faber.api.app.release.mapper.AppReleasePackageMapper;
 import com.faber.api.base.admin.biz.FileSaveBiz;
 import com.faber.api.base.admin.entity.FileSave;
 import com.faber.core.exception.BuzzException;
+import com.faber.core.vo.query.QueryParams;
 import com.faber.core.web.biz.BaseBiz;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -19,10 +25,12 @@ import java.io.Serializable;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Collection;
 import java.util.List;
 import java.nio.file.Files;
 
 /** 应用版本发布包业务。 */
+@Slf4j
 @Service
 public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppReleasePackage> {
 
@@ -32,6 +40,9 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
 
     @Resource
     FileSaveBiz fileSaveBiz;
+
+    @Value("${fa.app.release.wgt-max-size-bytes:209715200}")
+    private long maxWgtSizeBytes;
 
     public List<AppReleasePackage> listByReleaseId(Long releaseId) {
         return lambdaQuery()
@@ -67,6 +78,7 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         }
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public AppReleasePackage uploadWgt(Long releaseId, Long baseVersionCode, MultipartFile file) throws IOException {
         AppRelease release = requireDraftRelease(releaseId);
         validateWgtFile(file);
@@ -79,10 +91,22 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         candidate.setBaseVersionCode(baseVersionCode);
         validateUnique(candidate, null);
 
+        String sha256 = calculateSha256(file);
         FileSave fileSave = fileSaveBiz.upload(file);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == STATUS_COMMITTED) return;
+                try {
+                    fileSaveBiz.cleanupUploadedFile(fileSave);
+                } catch (RuntimeException error) {
+                    log.error("回滚WGT上传后清理文件失败, fileId={}", fileSave.getId(), error);
+                }
+            }
+        });
         candidate.setFileId(fileSave.getId());
         candidate.setSize(fileSave.getSize() != null ? fileSave.getSize() : file.getSize());
-        candidate.setSha256(calculateSha256(file));
+        candidate.setSha256(sha256);
         if (!save(candidate)) throw new BuzzException("WGT发布包保存失败，请重试");
         return candidate;
     }
@@ -116,6 +140,47 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         if (entity == null) throw new BuzzException("发布包ID异常，请检查");
         requireDraftRelease(entity.getReleaseId());
         return super.removeById(id);
+    }
+
+    @Override
+    public boolean saveBatch(Collection<AppReleasePackage> entityList) {
+        throw new BuzzException("发布包请逐条新增");
+    }
+
+    @Override
+    public boolean updateBatchById(Collection<AppReleasePackage> entityList) {
+        throw new BuzzException("发布包请逐条修改");
+    }
+
+    @Override
+    public boolean saveOrUpdateBatch(Collection<AppReleasePackage> entityList) {
+        throw new BuzzException("发布包请逐条保存");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void removeBatchByIds(List<Serializable> ids) {
+        if (ids != null) ids.forEach(this::removeById);
+    }
+
+    @Override
+    public void removePerById(Serializable id) {
+        throw new BuzzException("发布包不支持永久删除");
+    }
+
+    @Override
+    public void removePerBatchByIds(List<Serializable> ids) {
+        throw new BuzzException("发布包不支持永久删除");
+    }
+
+    @Override
+    public void removeByQuery(QueryParams query) {
+        throw new BuzzException("发布包请按ID删除");
+    }
+
+    @Override
+    public void removeMine() {
+        throw new BuzzException("发布包请按ID删除");
     }
 
     private AppRelease requireDraftRelease(Long releaseId) {
@@ -190,6 +255,7 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
 
     private void validateWgtFile(MultipartFile file) {
         if (file == null || file.isEmpty()) throw new BuzzException("WGT文件不能为空");
+        if (file.getSize() > maxWgtSizeBytes) throw new BuzzException("WGT文件大小超过上传限制");
         String filename = file.getOriginalFilename();
         if (filename == null || !filename.toLowerCase().endsWith(".wgt")) {
             throw new BuzzException("WGT文件必须使用.wgt后缀");

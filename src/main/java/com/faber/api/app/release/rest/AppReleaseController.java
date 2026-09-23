@@ -6,6 +6,7 @@ import com.faber.core.annotation.FaLogBiz;
 import com.faber.core.annotation.FaLogOpr;
 import com.faber.core.annotation.LogNoRet;
 import com.faber.core.config.annotation.IgnoreUserToken;
+import com.faber.core.config.annotation.Permission;
 import com.faber.core.enums.LogCrudEnum;
 import com.faber.core.vo.msg.Ret;
 import com.faber.core.web.rest.BaseController;
@@ -21,6 +22,7 @@ import com.faber.api.app.release.vo.ret.AppReleaseCheckRet;
 
 /** 应用通用版本发布管理接口。 */
 @FaLogBiz("应用版本发布")
+@Permission(permission = "/admin/app/app/apk")
 @RestController
 @RequestMapping("/api/app/app/release")
 public class AppReleaseController extends BaseController<AppReleaseBiz, AppRelease, Long> {
