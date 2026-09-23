@@ -9,6 +9,9 @@ import com.faber.api.base.admin.entity.FileSave;
 import com.faber.core.exception.BuzzException;
 import com.faber.core.vo.query.QueryParams;
 import com.faber.core.web.biz.BaseBiz;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,15 +27,25 @@ import java.io.InputStream;
 import java.io.Serializable;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.HexFormat;
 import java.util.Collection;
+import java.util.Enumeration;
 import java.util.List;
 import java.nio.file.Files;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipException;
+import java.util.zip.ZipFile;
 
 /** 应用版本发布包业务。 */
 @Slf4j
 @Service
 public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppReleasePackage> {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final int MAX_WGT_MANIFEST_SIZE = 1024 * 1024;
 
     @Lazy
     @Resource
@@ -79,16 +92,22 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public AppReleasePackage uploadWgt(Long releaseId, Long baseVersionCode, MultipartFile file) throws IOException {
+    public AppReleasePackage uploadWgt(Long releaseId, MultipartFile file) throws IOException {
+        return uploadWgt(releaseId, file, readWgtMetadata(file));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public AppReleasePackage uploadWgt(Long releaseId, MultipartFile file,
+                                       WgtMetadata metadata) throws IOException {
         AppRelease release = requireDraftRelease(releaseId);
         validateWgtFile(file);
-        validateWgtBaseVersion(baseVersionCode, release);
+        validateWgtMetadata(metadata, release);
 
         AppReleasePackage candidate = new AppReleasePackage();
         candidate.setReleaseId(releaseId);
         candidate.setPlatform(AppReleaseConstants.PLATFORM_APP_PLUS);
         candidate.setPackageType(AppReleaseConstants.PACKAGE_WGT);
-        candidate.setBaseVersionCode(baseVersionCode);
+        candidate.setBaseVersionCode(null);
         validateUnique(candidate, null);
 
         String sha256 = calculateSha256(file);
@@ -109,6 +128,47 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         candidate.setSha256(sha256);
         if (!save(candidate)) throw new BuzzException("WGT发布包保存失败，请重试");
         return candidate;
+    }
+
+    public WgtMetadata readWgtMetadata(MultipartFile file) throws IOException {
+        validateWgtFile(file);
+        Path tempFile = Files.createTempFile("fa-wgt-metadata-", ".wgt");
+        try {
+            try (InputStream input = file.getInputStream()) {
+                Files.copy(input, tempFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            try (ZipFile zip = new ZipFile(tempFile.toFile(), StandardCharsets.UTF_8)) {
+                ZipEntry manifest = findManifest(zip);
+                if (manifest == null) throw new BuzzException("WGT包中未找到manifest.json，无法识别资源版本");
+                byte[] content;
+                try (InputStream input = zip.getInputStream(manifest)) {
+                    content = input.readNBytes(MAX_WGT_MANIFEST_SIZE + 1);
+                }
+                if (content.length > MAX_WGT_MANIFEST_SIZE) {
+                    throw new BuzzException("WGT包内manifest.json超过1MiB，无法安全解析");
+                }
+
+                JsonNode root = OBJECT_MAPPER.readTree(content);
+                String versionName = readManifestValue(root, "versionName", "name");
+                String versionCodeText = readManifestValue(root, "versionCode", "code");
+                if (versionName == null || versionName.isBlank()
+                        || versionCodeText == null || !versionCodeText.matches("[1-9]\\d*")) {
+                    throw new BuzzException("WGT包内manifest.json缺少有效的资源版本名称或版本编码");
+                }
+                try {
+                    return new WgtMetadata(versionName.trim(), Long.parseLong(versionCodeText));
+                } catch (NumberFormatException error) {
+                    throw new BuzzException("WGT包内资源版本编码超出支持范围");
+                }
+            } catch (ZipException error) {
+                throw new BuzzException("WGT文件不是有效的ZIP资源包");
+            } catch (JsonProcessingException error) {
+                throw new BuzzException("WGT包内manifest.json格式无效");
+            }
+        } finally {
+            Files.deleteIfExists(tempFile);
+        }
     }
 
     @Override
@@ -216,9 +276,8 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         };
         if (!validPlatformPackage) throw new BuzzException("平台与发布包类型不匹配");
 
-        if (AppReleaseConstants.PACKAGE_WGT.equals(entity.getPackageType())) {
-            validateWgtBaseVersion(entity.getBaseVersionCode(), release);
-        } else if (entity.getBaseVersionCode() != null) {
+        if (!AppReleaseConstants.PACKAGE_WGT.equals(entity.getPackageType())
+                && entity.getBaseVersionCode() != null) {
             throw new BuzzException("只有WGT发布包允许填写基础版本号");
         }
         if (entity.getFileId() == null || entity.getFileId().isBlank()) {
@@ -237,21 +296,43 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
                 .eq(AppReleasePackage::getReleaseId, entity.getReleaseId())
                 .eq(AppReleasePackage::getPlatform, entity.getPlatform())
                 .eq(AppReleasePackage::getPackageType, entity.getPackageType())
-                .eq(AppReleaseConstants.PACKAGE_WGT.equals(entity.getPackageType()),
-                        AppReleasePackage::getBaseVersionCode, entity.getBaseVersionCode())
-                .isNull(!AppReleaseConstants.PACKAGE_WGT.equals(entity.getPackageType()),
-                        AppReleasePackage::getBaseVersionCode)
                 .ne(excludeId != null, AppReleasePackage::getId, excludeId)
                 .count();
-        if (count > 0) throw new BuzzException("同一版本的平台、包类型和基础版本已存在");
+        if (count > 0) throw new BuzzException("同一版本的平台和包类型已存在");
     }
 
-    private void validateWgtBaseVersion(Long baseVersionCode, AppRelease release) {
-        if (baseVersionCode == null || baseVersionCode < 1
-                || baseVersionCode >= release.getVersionCode()) {
-            throw new BuzzException("WGT基础版本号必须小于目标版本号");
+    private void validateWgtMetadata(WgtMetadata metadata, AppRelease release) {
+        if (metadata == null || !release.getVersionName().equals(metadata.versionName())
+                || !release.getVersionCode().equals(metadata.versionCode())) {
+            String packageVersion = metadata == null ? "无法识别" : metadata.versionName() + "（" + metadata.versionCode() + "）";
+            throw new BuzzException("WGT资源版本" + packageVersion + "与发布目标"
+                    + release.getVersionName() + "（" + release.getVersionCode() + "）不一致");
         }
     }
+
+    private ZipEntry findManifest(ZipFile zip) {
+        ZipEntry rootManifest = zip.getEntry("manifest.json");
+        if (rootManifest != null && !rootManifest.isDirectory()) return rootManifest;
+        Enumeration<? extends ZipEntry> entries = zip.entries();
+        while (entries.hasMoreElements()) {
+            ZipEntry entry = entries.nextElement();
+            String normalizedName = entry.getName().replace('\\', '/');
+            if (!entry.isDirectory() && normalizedName.endsWith("/manifest.json")) return entry;
+        }
+        return null;
+    }
+
+    private String readManifestValue(JsonNode root, String rootKey, String nestedKey) {
+        JsonNode value = root.path(rootKey);
+        if (value.isMissingNode() || value.isNull() || value.isContainerNode()) {
+            value = root.path("version").path(nestedKey);
+        }
+        if (value.isMissingNode() || value.isNull() || value.isContainerNode()) return null;
+        String text = value.asText();
+        return text == null || text.isBlank() ? null : text.trim();
+    }
+
+    public record WgtMetadata(String versionName, Long versionCode) {}
 
     private void validateWgtFile(MultipartFile file) {
         if (file == null || file.isEmpty()) throw new BuzzException("WGT文件不能为空");

@@ -35,8 +35,7 @@ public class AppReleasePackageController extends BaseController<AppReleasePackag
     @FaLogOpr(value = "上传WGT增量包", crud = LogCrudEnum.C)
     @PostMapping("/uploadWgt")
     public Ret<AppReleasePackage> uploadWgt(@RequestParam("releaseId") Long releaseId,
-                                            @RequestParam("baseVersionCode") Long baseVersionCode,
                                             @RequestParam("file") MultipartFile file) throws IOException {
-        return ok(baseBiz.uploadWgt(releaseId, baseVersionCode, file));
+        return ok(baseBiz.uploadWgt(releaseId, file));
     }
 }

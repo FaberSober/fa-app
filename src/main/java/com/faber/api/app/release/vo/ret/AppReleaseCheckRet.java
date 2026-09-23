@@ -12,7 +12,6 @@ public class AppReleaseCheckRet {
     private Long releaseId;
     private Long versionCode;
     private String versionName;
-    private Long baseVersionCode;
     private Boolean forceUpdate;
     private Long minSupportedVersionCode;
     private String fileId;

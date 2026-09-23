@@ -51,6 +51,7 @@ public class AppRelease extends BaseDelEntity {
     @NotNull
     private Boolean forceUpdate = false;
 
+    /** WGT 可选最低兼容 APK versionCode；为空表示不限制。 */
     private Long minSupportedVersionCode;
 
     /** 按安装标识稳定分流的百分比，100表示全量。 */

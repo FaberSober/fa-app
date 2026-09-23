@@ -16,6 +16,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
 
 import com.faber.api.app.release.vo.req.AppReleaseCheckReq;
 import com.faber.api.app.release.vo.ret.AppReleaseCheckRet;
@@ -31,7 +35,31 @@ public class AppReleaseController extends BaseController<AppReleaseBiz, AppRelea
     @LogNoRet
     @PostMapping("/check")
     public Ret<AppReleaseCheckRet> check(@Validated @RequestBody AppReleaseCheckReq request) {
-        return ok(baseBiz.check(request));
+        return ok(baseBiz.checkWgt(request));
+    }
+
+    @IgnoreUserToken
+    @LogNoRet
+    @PostMapping("/checkApk")
+    public Ret<AppReleaseCheckRet> checkApk(@Validated @RequestBody AppReleaseCheckReq request) throws IOException {
+        return ok(baseBiz.checkApk(request));
+    }
+
+    @IgnoreUserToken
+    @LogNoRet
+    @PostMapping("/checkWgt")
+    public Ret<AppReleaseCheckRet> checkWgt(@Validated @RequestBody AppReleaseCheckReq request) {
+        return ok(baseBiz.checkWgt(request));
+    }
+
+    @FaLogOpr(value = "上传WGT并创建发布草稿", crud = LogCrudEnum.C)
+    @PostMapping("/createWgtDraft")
+    public Ret<AppRelease> createWgtDraft(@RequestParam Integer appId,
+                                          @RequestParam(required = false) Long minSupportedVersionCode,
+                                          @RequestParam(defaultValue = "stable") String channel,
+                                          @RequestParam(required = false) String releaseNote,
+                                          @RequestParam("file") MultipartFile file) throws IOException {
+        return ok(baseBiz.createWgtDraft(appId, minSupportedVersionCode, channel, releaseNote, file));
     }
 
     @FaLogOpr(value = "发布应用版本", crud = LogCrudEnum.U)

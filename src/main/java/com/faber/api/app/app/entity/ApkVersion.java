@@ -55,6 +55,9 @@ public class ApkVersion extends BaseDelEntity {
     @ExcelProperty("强制更新")
     private Boolean forceUpdate = false;
 
+    @ExcelProperty("SHA-256")
+    private String sha256;
+
     @ExcelProperty("版本信息")
     private String remark;
 

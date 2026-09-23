@@ -33,7 +33,8 @@ public class AppReleasePackage extends BaseDelEntity {
     @SqlEquals
     private String packageType;
 
-    /** WGT 增量包对应的客户端基础 versionCode，完整包为空。 */
+    /** @deprecated WGT 最低 APK 要求已迁移到发布记录的 minSupportedVersionCode。 */
+    @Deprecated
     private Long baseVersionCode;
 
     @NotBlank

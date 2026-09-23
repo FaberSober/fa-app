@@ -20,7 +20,12 @@ public class AppReleaseCheckReq {
 
     @NotNull
     @Min(0)
+    /** 当前原生安装包版本。 */
     private Long currentVersionCode;
+
+    /** 当前WGT资源版本；旧客户端不传时按原生客户端版本兼容处理。 */
+    @Min(0)
+    private Long currentWgtVersionCode;
 
     @Size(max = 128)
     private String deviceId;

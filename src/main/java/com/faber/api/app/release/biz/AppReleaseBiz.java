@@ -1,8 +1,11 @@
 package com.faber.api.app.release.biz;
 
+import cn.hutool.crypto.digest.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.faber.api.app.app.biz.ApkBiz;
+import com.faber.api.app.app.biz.ApkVersionBiz;
 import com.faber.api.app.app.entity.Apk;
+import com.faber.api.app.app.entity.ApkVersion;
 import com.faber.api.base.telemetry.biz.TelemetryAppBiz;
 import com.faber.api.base.telemetry.entity.ClientErrorEvent;
 import com.faber.api.base.telemetry.entity.TelemetryApp;
@@ -23,9 +26,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Date;
 import java.util.List;
+import java.io.File;
+import java.io.IOException;
 
 /** 应用通用版本发布记录业务。 */
 @Slf4j
@@ -34,6 +40,9 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
     @Resource
     ApkBiz apkBiz;
+
+    @Resource
+    ApkVersionBiz apkVersionBiz;
 
     @Resource
     FileSaveBiz fileSaveBiz;
@@ -54,6 +63,24 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         entity.setStatus(AppReleaseConstants.STATUS_DRAFT);
         entity.setPublishTime(null);
         return super.save(entity);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public AppRelease createWgtDraft(Integer appId, Long minSupportedVersionCode, String channel,
+                                    String releaseNote, MultipartFile file) throws IOException {
+        AppReleasePackageBiz.WgtMetadata metadata = appReleasePackageBiz.readWgtMetadata(file);
+
+        AppRelease release = new AppRelease();
+        release.setAppId(appId);
+        release.setVersionName(metadata.versionName());
+        release.setVersionCode(metadata.versionCode());
+        release.setChannel(channel == null || channel.isBlank() ? "stable" : channel.trim());
+        release.setReleaseNote(trimToNull(releaseNote));
+        release.setMinSupportedVersionCode(minSupportedVersionCode);
+        if (!save(release)) throw new BuzzException("创建WGT发布草稿失败，请重试");
+
+        appReleasePackageBiz.uploadWgt(release.getId(), file, metadata);
+        return release;
     }
 
     @Override
@@ -102,35 +129,73 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         return release;
     }
 
-    public AppReleaseCheckRet check(AppReleaseCheckReq request) {
+    public AppReleaseCheckRet checkApk(AppReleaseCheckReq request) throws IOException {
+        validateCheckRequest(request);
+
+        Apk app = apkBiz.getByShortCode(request.getAppCode().trim());
+        long currentVersionCode = request.getCurrentVersionCode();
+        ApkVersion latestVersion = apkVersionBiz.getLatestVersion(app.getId());
+        if (latestVersion == null || latestVersion.getVersionCode() == null
+                || latestVersion.getVersionCode() <= currentVersionCode) {
+            return AppReleaseCheckRet.noUpdate();
+        }
+
+        FileSave fileSave = fileSaveBiz.getByIdWithCache(latestVersion.getFileId());
+        if (fileSave == null) return AppReleaseCheckRet.noUpdate();
+
+        String sha256 = latestVersion.getSha256();
+        if (sha256 == null || !sha256.matches("^[0-9a-fA-F]{64}$")) {
+            sha256 = calculateApkSha256(fileSave);
+            latestVersion.setSha256(sha256);
+            apkVersionBiz.updateById(latestVersion);
+        }
+
+        AppReleaseCheckRet result = new AppReleaseCheckRet();
+        result.setHasUpdate(true);
+        result.setUpdateType(AppReleaseConstants.UPDATE_FULL);
+        result.setReleaseId(latestVersion.getId().longValue());
+        result.setVersionCode(latestVersion.getVersionCode());
+        result.setVersionName(latestVersion.getVersionName());
+        result.setForceUpdate(Boolean.TRUE.equals(latestVersion.getForceUpdate()));
+        result.setFileId(latestVersion.getFileId());
+        result.setDownloadUrl(fileSaveBiz.getFileUrl(latestVersion.getFileId()));
+        result.setSize(latestVersion.getSize() != null ? latestVersion.getSize() : fileSave.getSize());
+        result.setSha256(sha256);
+        result.setReleaseNote(latestVersion.getRemark());
+        return result;
+    }
+
+    public AppReleaseCheckRet checkWgt(AppReleaseCheckReq request) {
         validateCheckRequest(request);
 
         Apk app = apkBiz.getByShortCode(request.getAppCode().trim());
         String platform = request.getPlatform().trim();
         String channel = request.getChannel().trim();
         long currentVersionCode = request.getCurrentVersionCode();
-        if (!AppReleaseConstants.PLATFORMS.contains(platform)) throw new BuzzException("不支持的发布平台");
+        if (!AppReleaseConstants.PLATFORM_APP_PLUS.equals(platform)) return AppReleaseCheckRet.noUpdate();
+        long currentWgtVersionCode = defaultValue(request.getCurrentWgtVersionCode(), currentVersionCode);
 
         List<AppRelease> releases = lambdaQuery()
                 .eq(AppRelease::getAppId, app.getId())
                 .eq(AppRelease::getChannel, channel)
                 .eq(AppRelease::getStatus, AppReleaseConstants.STATUS_PUBLISHED)
-                .gt(AppRelease::getVersionCode, currentVersionCode)
+                .gt(AppRelease::getVersionCode, currentWgtVersionCode)
                 .orderByDesc(AppRelease::getVersionCode)
                 .orderByDesc(AppRelease::getId)
                 .list();
 
         for (AppRelease release : releases) {
             if (!matchesDeviceScope(release, request.getDeviceId())) continue;
+            if (release.getMinSupportedVersionCode() != null
+                    && currentVersionCode < release.getMinSupportedVersionCode()) continue;
             List<AppReleasePackage> packages = appReleasePackageBiz.listByReleaseId(release.getId());
-            AppReleasePackage releasePackage = selectPackage(platform, currentVersionCode, release, packages);
+            AppReleasePackage releasePackage = findPackage(packages, AppReleaseConstants.PACKAGE_WGT);
             if (releasePackage == null) continue;
 
             FileSave fileSave = fileSaveBiz.getByIdWithCache(releasePackage.getFileId());
             if (fileSave == null) continue;
 
-            return toCheckResult(release, releasePackage, fileSave,
-                    currentVersionCode < defaultValue(release.getMinSupportedVersionCode(), 0L));
+            return toCheckResult(release, releasePackage, fileSave);
         }
         return AppReleaseCheckRet.noUpdate();
     }
@@ -189,9 +254,8 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
             throw new BuzzException("发布渠道不能为空");
         }
         if (entity.getMinSupportedVersionCode() != null
-                && (entity.getMinSupportedVersionCode() < 1
-                || entity.getMinSupportedVersionCode() > entity.getVersionCode())) {
-            throw new BuzzException("最低支持版本号必须是正整数且不能大于目标版本号");
+                && entity.getMinSupportedVersionCode() < 1) {
+            throw new BuzzException("最低兼容APK版本必须是正整数");
         }
         int rolloutPercent = defaultValue(entity.getRolloutPercent(), 100);
         if (rolloutPercent < 0 || rolloutPercent > 100) {
@@ -224,8 +288,14 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         if (request.getPlatform() == null || request.getPlatform().isBlank()) {
             throw new BuzzException("发布平台不能为空");
         }
+        if (!AppReleaseConstants.PLATFORMS.contains(request.getPlatform().trim())) {
+            throw new BuzzException("不支持的发布平台");
+        }
         if (request.getCurrentVersionCode() == null || request.getCurrentVersionCode() < 0) {
             throw new BuzzException("当前版本号不能小于0");
+        }
+        if (request.getCurrentWgtVersionCode() != null && request.getCurrentWgtVersionCode() < 0) {
+            throw new BuzzException("当前WGT资源版本号不能小于0");
         }
         if (request.getChannel() == null || request.getChannel().isBlank()) {
             throw new BuzzException("发布渠道不能为空");
@@ -295,39 +365,15 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
                 .lt(ClientErrorEvent::getOccurTime, now));
     }
 
-    private AppReleasePackage selectPackage(String platform, long currentVersionCode,
-                                            AppRelease release, List<AppReleasePackage> packages) {
-        boolean forceFull = release.getMinSupportedVersionCode() != null
-                && currentVersionCode < release.getMinSupportedVersionCode();
-        if (forceFull) return findFullPackage(platform, packages);
-
-        if (AppReleaseConstants.PLATFORM_APP_PLUS.equals(platform)) {
-            AppReleasePackage wgt = findPackage(packages, AppReleaseConstants.PACKAGE_WGT, currentVersionCode);
-            if (wgt != null) return wgt;
-        }
-        return findFullPackage(platform, packages);
-    }
-
-    private AppReleasePackage findFullPackage(String platform, List<AppReleasePackage> packages) {
-        String packageType = switch (platform) {
-            case AppReleaseConstants.PLATFORM_ANDROID -> AppReleaseConstants.PACKAGE_APK;
-            case AppReleaseConstants.PLATFORM_IOS -> AppReleaseConstants.PACKAGE_IPA;
-            default -> AppReleaseConstants.PACKAGE_FULL;
-        };
-        AppReleasePackage packageInfo = findPackage(packages, packageType, null);
-        return packageInfo != null ? packageInfo : findPackage(packages, AppReleaseConstants.PACKAGE_FULL, null);
-    }
-
-    private AppReleasePackage findPackage(List<AppReleasePackage> packages, String packageType, Long baseVersionCode) {
+    private AppReleasePackage findPackage(List<AppReleasePackage> packages, String packageType) {
         return packages.stream()
                 .filter(item -> packageType.equals(item.getPackageType()))
-                .filter(item -> baseVersionCode == null || baseVersionCode.equals(item.getBaseVersionCode()))
                 .findFirst()
                 .orElse(null);
     }
 
     private AppReleaseCheckRet toCheckResult(AppRelease release, AppReleasePackage releasePackage,
-                                             FileSave fileSave, boolean forceFull) {
+                                             FileSave fileSave) {
         AppReleaseCheckRet result = new AppReleaseCheckRet();
         result.setHasUpdate(true);
         result.setUpdateType(AppReleaseConstants.PACKAGE_WGT.equals(releasePackage.getPackageType())
@@ -335,8 +381,7 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         result.setReleaseId(release.getId());
         result.setVersionCode(release.getVersionCode());
         result.setVersionName(release.getVersionName());
-        result.setBaseVersionCode(releasePackage.getBaseVersionCode());
-        result.setForceUpdate(forceFull || Boolean.TRUE.equals(release.getForceUpdate()));
+        result.setForceUpdate(Boolean.TRUE.equals(release.getForceUpdate()));
         result.setMinSupportedVersionCode(release.getMinSupportedVersionCode());
         result.setFileId(releasePackage.getFileId());
         result.setDownloadUrl(fileSaveBiz.getFileUrl(releasePackage.getFileId()));
@@ -344,6 +389,18 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         result.setSha256(releasePackage.getSha256());
         result.setReleaseNote(release.getReleaseNote());
         return result;
+    }
+
+    private String calculateApkSha256(FileSave fileSave) throws IOException {
+        File file = fileSaveBiz.getFileObj(fileSave);
+        try {
+            return DigestUtil.sha256Hex(file);
+        } finally {
+            if (fileSave.getPlatform() != null && !fileSave.getPlatform().startsWith("local-")
+                    && file != null && file.exists() && !file.delete()) {
+                log.warn("清理APK校验临时文件失败: {}", file.getAbsolutePath());
+            }
+        }
     }
 
     private long defaultValue(Long value, long defaultValue) {
