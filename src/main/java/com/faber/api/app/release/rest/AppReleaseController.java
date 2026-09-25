@@ -5,6 +5,7 @@ import com.faber.api.app.release.entity.AppRelease;
 import com.faber.core.annotation.FaLogBiz;
 import com.faber.core.annotation.FaLogOpr;
 import com.faber.core.annotation.LogNoRet;
+import com.faber.core.config.annotation.ApiToken;
 import com.faber.core.config.annotation.IgnoreUserToken;
 import com.faber.core.config.annotation.Permission;
 import com.faber.core.enums.LogCrudEnum;
@@ -53,6 +54,7 @@ public class AppReleaseController extends BaseController<AppReleaseBiz, AppRelea
     }
 
     @FaLogOpr(value = "上传WGT并创建发布草稿", crud = LogCrudEnum.C)
+    @ApiToken
     @PostMapping("/createWgtDraft")
     public Ret<AppRelease> createWgtDraft(@RequestParam Integer appId,
                                           @RequestParam(required = false) Long minSupportedVersionCode,
@@ -63,6 +65,7 @@ public class AppReleaseController extends BaseController<AppReleaseBiz, AppRelea
     }
 
     @FaLogOpr(value = "发布应用版本", crud = LogCrudEnum.U)
+    @ApiToken
     @PostMapping("/publish/{id}")
     public Ret<AppRelease> publish(@PathVariable Long id) {
         return ok(baseBiz.publish(id));
