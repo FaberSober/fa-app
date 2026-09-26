@@ -36,6 +36,7 @@ public class ApkVersionBiz extends BaseBiz<ApkVersionMapper,ApkVersion> {
     public List<ApkVersion> listByAppId(Integer appId) {
         return lambdaQuery()
                 .eq(ApkVersion::getAppId, appId)
+                .orderByDesc(ApkVersion::getVersionCode)
                 .orderByDesc(ApkVersion::getId)
                 .list();
     }
