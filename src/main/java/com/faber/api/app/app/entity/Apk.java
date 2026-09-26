@@ -12,6 +12,7 @@ import lombok.Data;
 
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Null;
+import jakarta.validation.constraints.Size;
 
 
 /**
@@ -39,6 +40,10 @@ public class Apk extends BaseDelEntity {
     @NotNull
     @ExcelProperty("应用包名")
     private String applicationId;
+
+    @ExcelProperty("DCloud AppID")
+    @Size(max = 128)
+    private String dcloudAppId;
 
     @NotNull
     @ExcelProperty("当前版本号")

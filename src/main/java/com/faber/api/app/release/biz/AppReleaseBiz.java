@@ -18,6 +18,9 @@ import com.faber.api.app.release.entity.AppRelease;
 import com.faber.api.app.release.entity.AppReleasePackage;
 import com.faber.api.app.release.mapper.AppReleaseMapper;
 import com.faber.api.app.release.vo.req.AppReleaseCheckReq;
+import com.faber.api.app.release.vo.req.AppReleaseAutoMatchReq;
+import com.faber.api.app.release.vo.ret.AppReleaseAutoMatchRet;
+import com.faber.api.app.release.vo.ret.AppReleaseAutoMatchPreviewRet;
 import com.faber.api.app.release.vo.ret.AppReleaseCheckRet;
 import com.faber.core.exception.BuzzException;
 import com.faber.core.web.biz.BaseBiz;
@@ -69,18 +72,103 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
     public AppRelease createWgtDraft(Integer appId, Long minSupportedVersionCode, String channel,
                                     String releaseNote, MultipartFile file) throws IOException {
         AppReleasePackageBiz.WgtMetadata metadata = appReleasePackageBiz.readWgtMetadata(file);
+        Apk app = apkBiz.getById(appId);
+        if (app == null) throw new BuzzException("APP ID异常，请检查");
+        return createWgtDraft(app, minSupportedVersionCode, channel, releaseNote, file, metadata);
+    }
 
+    @Transactional(rollbackFor = Exception.class)
+    public AppReleaseAutoMatchRet createWgtDraftByWgt(String channel, String releaseNote,
+                                                       MultipartFile file) throws IOException {
+        AppReleasePackageBiz.WgtMetadata metadata = appReleasePackageBiz.readWgtMetadata(file);
+        if (metadata.dcloudAppId() == null || metadata.dcloudAppId().isBlank()) {
+            throw new BuzzException("WGT清单中缺少 DCloud AppID，无法自动匹配应用");
+        }
+        Apk app = apkBiz.getByDcloudAppId(metadata.dcloudAppId());
+        AppRelease release = createWgtDraft(app, null, channel, releaseNote, file, metadata);
+        return new AppReleaseAutoMatchRet(release, app.getName(), app.getApplicationId(), app.getDcloudAppId());
+    }
+
+    public AppReleaseAutoMatchPreviewRet matchWgtAppByFileId(String fileId) throws IOException {
+        FileSave fileSave = fileSaveBiz.getById(fileId);
+        if (fileSave == null) throw new BuzzException("WGT文件不存在，请重新上传");
+
+        AppReleasePackageBiz.WgtMetadata metadata = appReleasePackageBiz.readWgtMetadata(fileSave);
+        Apk app = requireAppForWgt(metadata);
+        return new AppReleaseAutoMatchPreviewRet(
+                app.getId(),
+                app.getName(),
+                app.getApplicationId(),
+                app.getDcloudAppId(),
+                app.getVersionCode() == null ? null : app.getVersionCode().toString(),
+                app.getVersionName(),
+                metadata.versionName(),
+                metadata.versionCode().toString()
+        );
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public AppReleaseAutoMatchRet createWgtDraftFromFile(AppReleaseAutoMatchReq request) throws IOException {
+        FileSave fileSave = fileSaveBiz.getById(request.fileId());
+        if (fileSave == null) throw new BuzzException("WGT文件不存在，请重新上传");
+
+        AppReleasePackageBiz.WgtMetadata metadata = appReleasePackageBiz.readWgtMetadata(fileSave);
+        Apk app = requireAppForWgt(metadata);
+        validateMinimumSupportedApkVersion(app, request.minSupportedVersionCode());
+
+        AppRelease release = createWgtDraftRecord(
+                app, request.minSupportedVersionCode(), request.channel(), request.releaseNote(), metadata);
+        appReleasePackageBiz.uploadWgt(release.getId(), fileSave, metadata);
+        return new AppReleaseAutoMatchRet(release, app.getName(), app.getApplicationId(), app.getDcloudAppId());
+    }
+
+    private Apk requireAppForWgt(AppReleasePackageBiz.WgtMetadata metadata) {
+        if (metadata.dcloudAppId() == null || metadata.dcloudAppId().isBlank()) {
+            throw new BuzzException("WGT清单中缺少 DCloud AppID，无法自动匹配应用");
+        }
+        return apkBiz.getByDcloudAppId(metadata.dcloudAppId());
+    }
+
+    private void validateMinimumSupportedApkVersion(Apk app, Long minSupportedVersionCode) {
+        if (minSupportedVersionCode == null) return;
+        boolean currentVersion = minSupportedVersionCode.equals(app.getVersionCode());
+        boolean historyVersion = apkVersionBiz.listByAppId(app.getId()).stream()
+                .anyMatch(version -> minSupportedVersionCode.equals(version.getVersionCode()));
+        if (!currentVersion && !historyVersion) {
+            throw new BuzzException("最低支持 APK 版本不属于匹配应用的历史版本");
+        }
+    }
+
+    private AppRelease createWgtDraft(Apk app, Long minSupportedVersionCode, String channel,
+                                      String releaseNote, MultipartFile file,
+                                      AppReleasePackageBiz.WgtMetadata metadata) throws IOException {
+        AppRelease release = createWgtDraftRecord(app, minSupportedVersionCode, channel, releaseNote, metadata);
+        appReleasePackageBiz.uploadWgt(release.getId(), file, metadata);
+        return release;
+    }
+
+    private AppRelease createWgtDraftRecord(Apk app, Long minSupportedVersionCode, String channel,
+                                            String releaseNote,
+                                            AppReleasePackageBiz.WgtMetadata metadata) {
+        validateWgtAppId(app, metadata);
         AppRelease release = new AppRelease();
-        release.setAppId(appId);
+        release.setAppId(app.getId());
         release.setVersionName(metadata.versionName());
         release.setVersionCode(metadata.versionCode());
         release.setChannel(channel == null || channel.isBlank() ? "stable" : channel.trim());
         release.setReleaseNote(trimToNull(releaseNote));
         release.setMinSupportedVersionCode(minSupportedVersionCode);
         if (!save(release)) throw new BuzzException("创建WGT发布草稿失败，请重试");
-
-        appReleasePackageBiz.uploadWgt(release.getId(), file, metadata);
         return release;
+    }
+
+    private void validateWgtAppId(Apk app, AppReleasePackageBiz.WgtMetadata metadata) {
+        String registeredDcloudAppId = app.getDcloudAppId();
+        if (registeredDcloudAppId != null && !registeredDcloudAppId.isBlank()
+                && metadata.dcloudAppId() != null && !metadata.dcloudAppId().isBlank()
+                && !registeredDcloudAppId.equals(metadata.dcloudAppId())) {
+            throw new BuzzException("WGT中的 DCloud AppID 与所选 APK 应用不一致");
+        }
     }
 
     @Override

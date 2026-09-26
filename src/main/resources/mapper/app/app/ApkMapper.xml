@@ -8,6 +8,7 @@
         <result property="id" column="id"/>
         <result property="name" column="name"/>
         <result property="applicationId" column="application_id"/>
+        <result property="dcloudAppId" column="dcloud_app_id"/>
         <result property="versionCode" column="version_code"/>
         <result property="versionName" column="version_name"/>
         <result property="iconId" column="icon_id"/>

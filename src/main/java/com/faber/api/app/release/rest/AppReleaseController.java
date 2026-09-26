@@ -23,6 +23,9 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 
 import com.faber.api.app.release.vo.req.AppReleaseCheckReq;
+import com.faber.api.app.release.vo.req.AppReleaseAutoMatchReq;
+import com.faber.api.app.release.vo.ret.AppReleaseAutoMatchRet;
+import com.faber.api.app.release.vo.ret.AppReleaseAutoMatchPreviewRet;
 import com.faber.api.app.release.vo.ret.AppReleaseCheckRet;
 
 /** 应用通用版本发布管理接口。 */
@@ -62,6 +65,32 @@ public class AppReleaseController extends BaseController<AppReleaseBiz, AppRelea
                                           @RequestParam(required = false) String releaseNote,
                                           @RequestParam("file") MultipartFile file) throws IOException {
         return ok(baseBiz.createWgtDraft(appId, minSupportedVersionCode, channel, releaseNote, file));
+    }
+
+    @FaLogOpr(value = "上传WGT并自动匹配应用", crud = LogCrudEnum.C)
+    @ApiToken
+    @PostMapping("/createWgtDraftByWgt")
+    public Ret<AppReleaseAutoMatchRet> createWgtDraftByWgt(
+            @RequestParam(defaultValue = "stable") String channel,
+            @RequestParam(required = false) String releaseNote,
+            @RequestParam("file") MultipartFile file) throws IOException {
+        return ok(baseBiz.createWgtDraftByWgt(channel, releaseNote, file));
+    }
+
+    @FaLogOpr(value = "解析WGT并匹配APK应用", crud = LogCrudEnum.R)
+    @ApiToken
+    @PostMapping("/matchWgtAppByFileId")
+    public Ret<AppReleaseAutoMatchPreviewRet> matchWgtAppByFileId(
+            @Validated @RequestBody AppReleaseAutoMatchReq request) throws IOException {
+        return ok(baseBiz.matchWgtAppByFileId(request.fileId()));
+    }
+
+    @FaLogOpr(value = "上传WGT并创建发布草稿", crud = LogCrudEnum.C)
+    @ApiToken
+    @PostMapping("/createWgtDraftFromFile")
+    public Ret<AppReleaseAutoMatchRet> createWgtDraftFromFile(
+            @Validated @RequestBody AppReleaseAutoMatchReq request) throws IOException {
+        return ok(baseBiz.createWgtDraftFromFile(request));
     }
 
     @FaLogOpr(value = "发布应用版本", crud = LogCrudEnum.U)

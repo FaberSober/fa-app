@@ -22,6 +22,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Serializable;
@@ -34,6 +35,11 @@ import java.util.HexFormat;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.nio.file.Files;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipException;
@@ -46,6 +52,9 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final int MAX_WGT_MANIFEST_SIZE = 1024 * 1024;
+    private static final int MAX_WGT_MANIFEST_CANDIDATES = 64;
+    private static final Pattern WGT_APP_ID_PATH_PATTERN =
+            Pattern.compile("(?:^|/)apps/([^/]+)/www/manifest\\.json$", Pattern.CASE_INSENSITIVE);
 
     @Lazy
     @Resource
@@ -130,6 +139,27 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         return candidate;
     }
 
+    @Transactional(rollbackFor = Exception.class)
+    public AppReleasePackage uploadWgt(Long releaseId, FileSave fileSave,
+                                       WgtMetadata metadata) throws IOException {
+        AppRelease release = requireDraftRelease(releaseId);
+        validateWgtFile(fileSave);
+        validateWgtMetadata(metadata, release);
+
+        AppReleasePackage candidate = new AppReleasePackage();
+        candidate.setReleaseId(releaseId);
+        candidate.setPlatform(AppReleaseConstants.PLATFORM_APP_PLUS);
+        candidate.setPackageType(AppReleaseConstants.PACKAGE_WGT);
+        candidate.setBaseVersionCode(null);
+        validateUnique(candidate, null);
+
+        candidate.setFileId(fileSave.getId());
+        candidate.setSize(fileSave.getSize());
+        candidate.setSha256(calculateSha256(fileSave));
+        if (!save(candidate)) throw new BuzzException("WGT发布包保存失败，请重试");
+        return candidate;
+    }
+
     public WgtMetadata readWgtMetadata(MultipartFile file) throws IOException {
         validateWgtFile(file);
         Path tempFile = Files.createTempFile("fa-wgt-metadata-", ".wgt");
@@ -137,37 +167,51 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
             try (InputStream input = file.getInputStream()) {
                 Files.copy(input, tempFile, StandardCopyOption.REPLACE_EXISTING);
             }
-
-            try (ZipFile zip = new ZipFile(tempFile.toFile(), StandardCharsets.UTF_8)) {
-                ZipEntry manifest = findManifest(zip);
-                if (manifest == null) throw new BuzzException("WGT包中未找到manifest.json，无法识别资源版本");
-                byte[] content;
-                try (InputStream input = zip.getInputStream(manifest)) {
-                    content = input.readNBytes(MAX_WGT_MANIFEST_SIZE + 1);
-                }
-                if (content.length > MAX_WGT_MANIFEST_SIZE) {
-                    throw new BuzzException("WGT包内manifest.json超过1MiB，无法安全解析");
-                }
-
-                JsonNode root = OBJECT_MAPPER.readTree(content);
-                String versionName = readManifestValue(root, "versionName", "name");
-                String versionCodeText = readManifestValue(root, "versionCode", "code");
-                if (versionName == null || versionName.isBlank()
-                        || versionCodeText == null || !versionCodeText.matches("[1-9]\\d*")) {
-                    throw new BuzzException("WGT包内manifest.json缺少有效的资源版本名称或版本编码");
-                }
-                try {
-                    return new WgtMetadata(versionName.trim(), Long.parseLong(versionCodeText));
-                } catch (NumberFormatException error) {
-                    throw new BuzzException("WGT包内资源版本编码超出支持范围");
-                }
-            } catch (ZipException error) {
-                throw new BuzzException("WGT文件不是有效的ZIP资源包");
-            } catch (JsonProcessingException error) {
-                throw new BuzzException("WGT包内manifest.json格式无效");
-            }
+            return readWgtMetadata(tempFile.toFile());
         } finally {
             Files.deleteIfExists(tempFile);
+        }
+    }
+
+    public WgtMetadata readWgtMetadata(FileSave fileSave) throws IOException {
+        validateWgtFile(fileSave);
+        File file = fileSaveBiz.getFileObj(fileSave);
+        try {
+            return readWgtMetadata(file);
+        } finally {
+            deleteRemoteTempFile(fileSave, file);
+        }
+    }
+
+    private WgtMetadata readWgtMetadata(File file) throws IOException {
+        try (ZipFile zip = new ZipFile(file, StandardCharsets.UTF_8)) {
+            ZipEntry manifest = findManifest(zip);
+            if (manifest == null) throw new BuzzException("WGT包中未找到manifest.json，无法识别资源版本");
+            byte[] content;
+            try (InputStream input = zip.getInputStream(manifest)) {
+                content = input.readNBytes(MAX_WGT_MANIFEST_SIZE + 1);
+            }
+            if (content.length > MAX_WGT_MANIFEST_SIZE) {
+                throw new BuzzException("WGT包内manifest.json超过1MiB，无法安全解析");
+            }
+
+            JsonNode root = OBJECT_MAPPER.readTree(content);
+            String dcloudAppId = readDcloudAppId(zip, manifest, root);
+            String versionName = readManifestValue(root, "versionName", "name");
+            String versionCodeText = readManifestValue(root, "versionCode", "code");
+            if (versionName == null || versionName.isBlank()
+                    || versionCodeText == null || !versionCodeText.matches("[1-9]\\d*")) {
+                throw new BuzzException("WGT包内manifest.json缺少有效的资源版本名称或版本编码");
+            }
+            try {
+                return new WgtMetadata(dcloudAppId, versionName.trim(), Long.parseLong(versionCodeText));
+            } catch (NumberFormatException error) {
+                throw new BuzzException("WGT包内资源版本编码超出支持范围");
+            }
+        } catch (ZipException error) {
+            throw new BuzzException("WGT文件不是有效的ZIP资源包");
+        } catch (JsonProcessingException error) {
+            throw new BuzzException("WGT包内manifest.json格式无效");
         }
     }
 
@@ -322,6 +366,58 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         return null;
     }
 
+    private String readDcloudAppId(ZipFile zip, ZipEntry selectedManifest, JsonNode selectedRoot) throws IOException {
+        Set<String> appIds = new LinkedHashSet<>();
+        addDcloudAppId(appIds, readManifestValue(selectedRoot, "appid", "appid"));
+        // Packaged WGTs may normalize uni-app's manifest appid field to the top-level "id" field.
+        addDcloudAppId(appIds, readManifestValue(selectedRoot, "id", "id"));
+        addDcloudAppIdFromPath(appIds, selectedManifest.getName());
+
+        int manifestCount = 0;
+        Enumeration<? extends ZipEntry> entries = zip.entries();
+        while (entries.hasMoreElements()) {
+            ZipEntry entry = entries.nextElement();
+            String entryName = entry.getName().replace('\\', '/');
+            String lowerEntryName = entryName.toLowerCase(Locale.ROOT);
+            if (entry.isDirectory() || !(lowerEntryName.equals("manifest.json")
+                    || lowerEntryName.endsWith("/manifest.json"))) {
+                continue;
+            }
+            if (++manifestCount > MAX_WGT_MANIFEST_CANDIDATES) {
+                throw new BuzzException("WGT包中manifest.json文件过多，无法安全识别 DCloud AppID");
+            }
+
+            addDcloudAppIdFromPath(appIds, entryName);
+            if (entry.getName().equals(selectedManifest.getName()) || entry.getSize() > MAX_WGT_MANIFEST_SIZE) continue;
+
+            byte[] content;
+            try (InputStream input = zip.getInputStream(entry)) {
+                content = input.readNBytes(MAX_WGT_MANIFEST_SIZE + 1);
+            }
+            if (content.length > MAX_WGT_MANIFEST_SIZE) continue;
+            try {
+                JsonNode candidateRoot = OBJECT_MAPPER.readTree(content);
+                if (candidateRoot != null) {
+                    addDcloudAppId(appIds, readManifestValue(candidateRoot, "appid", "appid"));
+                }
+            } catch (JsonProcessingException ignored) {
+                // Ignore unrelated or non-JSON manifest files; the selected resource manifest is validated separately.
+            }
+        }
+
+        if (appIds.size() > 1) throw new BuzzException("WGT包中包含多个不同的 DCloud AppID，无法自动匹配应用");
+        return appIds.stream().findFirst().orElse(null);
+    }
+
+    private void addDcloudAppIdFromPath(Set<String> appIds, String entryName) {
+        Matcher matcher = WGT_APP_ID_PATH_PATTERN.matcher(entryName.replace('\\', '/'));
+        if (matcher.find()) addDcloudAppId(appIds, matcher.group(1));
+    }
+
+    private void addDcloudAppId(Set<String> appIds, String dcloudAppId) {
+        if (dcloudAppId != null && !dcloudAppId.isBlank()) appIds.add(dcloudAppId.trim());
+    }
+
     private String readManifestValue(JsonNode root, String rootKey, String nestedKey) {
         JsonNode value = root.path(rootKey);
         if (value.isMissingNode() || value.isNull() || value.isContainerNode()) {
@@ -332,7 +428,7 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         return text == null || text.isBlank() ? null : text.trim();
     }
 
-    public record WgtMetadata(String versionName, Long versionCode) {}
+    public record WgtMetadata(String dcloudAppId, String versionName, Long versionCode) {}
 
     private void validateWgtFile(MultipartFile file) {
         if (file == null || file.isEmpty()) throw new BuzzException("WGT文件不能为空");
@@ -340,6 +436,35 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         String filename = file.getOriginalFilename();
         if (filename == null || !filename.toLowerCase().endsWith(".wgt")) {
             throw new BuzzException("WGT文件必须使用.wgt后缀");
+        }
+    }
+
+    private void validateWgtFile(FileSave fileSave) {
+        if (fileSave == null) throw new BuzzException("WGT文件不存在，请重新上传");
+        if (fileSave.getSize() == null || fileSave.getSize() <= 0) {
+            throw new BuzzException("WGT文件大小异常，请重新上传");
+        }
+        if (fileSave.getSize() > maxWgtSizeBytes) throw new BuzzException("WGT文件大小超过上传限制");
+        String filename = fileSave.getOriginalFilename();
+        if (filename == null || !filename.toLowerCase().endsWith(".wgt")) {
+            throw new BuzzException("WGT文件必须使用.wgt后缀");
+        }
+    }
+
+    private String calculateSha256(FileSave fileSave) throws IOException {
+        File file = fileSaveBiz.getFileObj(fileSave);
+        try (InputStream input = Files.newInputStream(file.toPath())) {
+            return calculateSha256(input);
+        } finally {
+            deleteRemoteTempFile(fileSave, file);
+        }
+    }
+
+    private void deleteRemoteTempFile(FileSave fileSave, File file) {
+        if (fileSave != null && fileSave.getPlatform() != null
+                && !fileSave.getPlatform().startsWith("local-")
+                && file != null && file.exists() && !file.delete()) {
+            log.warn("清理WGT临时文件失败: {}", file.getAbsolutePath());
         }
     }
 
