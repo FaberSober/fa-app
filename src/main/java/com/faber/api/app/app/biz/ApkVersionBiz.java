@@ -1,6 +1,7 @@
 package com.faber.api.app.app.biz;
 
 import com.faber.api.app.app.entity.Apk;
+import com.faber.api.app.release.AppReleaseConstants;
 import com.faber.core.exception.BuzzException;
 import com.faber.core.vo.msg.Ret;
 import org.springframework.context.annotation.Lazy;
@@ -11,6 +12,9 @@ import com.faber.api.app.app.mapper.ApkVersionMapper;
 import com.faber.core.web.biz.BaseBiz;
 
 import jakarta.annotation.Resource;
+import java.io.Serializable;
+import java.util.Collection;
+import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 
@@ -41,6 +45,27 @@ public class ApkVersionBiz extends BaseBiz<ApkVersionMapper,ApkVersion> {
                 .list();
     }
 
+    /** 公开版本列表仅展示已发布的 APK。 */
+    public List<ApkVersion> listPublishedByAppId(Integer appId) {
+        return lambdaQuery()
+                .eq(ApkVersion::getAppId, appId)
+                .eq(ApkVersion::getStatus, AppReleaseConstants.STATUS_PUBLISHED)
+                .orderByDesc(ApkVersion::getVersionCode)
+                .orderByDesc(ApkVersion::getId)
+                .list();
+    }
+
+    /** 批量查询多个 APP 的正式 APK，并按 APP 和版本号降序排列。 */
+    public List<ApkVersion> listPublishedByAppIds(Collection<Integer> appIds) {
+        return lambdaQuery()
+                .in(ApkVersion::getAppId, appIds)
+                .eq(ApkVersion::getStatus, AppReleaseConstants.STATUS_PUBLISHED)
+                .orderByAsc(ApkVersion::getAppId)
+                .orderByDesc(ApkVersion::getVersionCode)
+                .orderByDesc(ApkVersion::getId)
+                .list();
+    }
+
     /**
      * 指定版本号下载数+1
      * @param id
@@ -48,6 +73,9 @@ public class ApkVersionBiz extends BaseBiz<ApkVersionMapper,ApkVersion> {
     public void addDownloadNum(Integer id) {
         ApkVersion apkVersion = getById(id);
         if (apkVersion == null) throw new BuzzException("ID异常，请检查");
+        if (!AppReleaseConstants.STATUS_PUBLISHED.equals(apkVersion.getStatus())) {
+            throw new BuzzException("该 APK 版本尚未发布或已撤回");
+        }
 
         Apk apk = apkBiz.getById(apkVersion.getAppId());
         if (apk == null) throw new BuzzException("APP ID异常，请检查");
@@ -70,10 +98,23 @@ public class ApkVersionBiz extends BaseBiz<ApkVersionMapper,ApkVersion> {
         );
     }
 
+    /** 获取指定 APP 最新的正式 APK 版本。 */
+    public ApkVersion getLatestPublishedVersion(Integer appId) {
+        return getTop(
+                lambdaQuery()
+                        .eq(ApkVersion::getAppId, appId)
+                        .eq(ApkVersion::getStatus, AppReleaseConstants.STATUS_PUBLISHED)
+                        .orderByDesc(ApkVersion::getVersionCode)
+                        .orderByDesc(ApkVersion::getId)
+        );
+    }
+
     @Override
     public boolean save(ApkVersion entity) {
         validateNewVersion(entity);
         if (entity.getDownloadNum() == null) entity.setDownloadNum(0);
+        entity.setStatus(AppReleaseConstants.STATUS_DRAFT);
+        entity.setPublishTime(null);
         if (entity.getForceUpdate() == null) entity.setForceUpdate(false);
         return super.save(entity);
     }
@@ -82,6 +123,9 @@ public class ApkVersionBiz extends BaseBiz<ApkVersionMapper,ApkVersion> {
     public boolean updateById(ApkVersion entity) {
         ApkVersion current = getById(entity.getId());
         if (current == null) throw new BuzzException("版本ID异常，请检查");
+        if (entity.getStatus() != null && !Objects.equals(entity.getStatus(), current.getStatus())) {
+            throw new BuzzException("发布状态请使用发布或撤回操作修改");
+        }
         if (entity.getVersionCode() != null && !Objects.equals(entity.getVersionCode(), current.getVersionCode())) {
             throw new BuzzException("历史版本号不允许修改");
         }
@@ -89,6 +133,79 @@ public class ApkVersionBiz extends BaseBiz<ApkVersionMapper,ApkVersion> {
             throw new BuzzException("历史版本所属APP不允许修改");
         }
         return super.updateById(entity);
+    }
+
+    public ApkVersion publish(Integer id) {
+        ApkVersion version = requireVersion(id);
+        if (!AppReleaseConstants.STATUS_DRAFT.equals(version.getStatus())) {
+            throw new BuzzException("只有草稿 APK 可以发布");
+        }
+        ApkVersion latestPublished = getLatestPublishedVersion(version.getAppId());
+        if (latestPublished != null && version.getVersionCode() <= latestPublished.getVersionCode()) {
+            throw new BuzzException("只能发布高于当前已发布版本号的 APK");
+        }
+
+        boolean updated = lambdaUpdate()
+                .eq(ApkVersion::getId, id)
+                .eq(ApkVersion::getStatus, AppReleaseConstants.STATUS_DRAFT)
+                .set(ApkVersion::getStatus, AppReleaseConstants.STATUS_PUBLISHED)
+                .set(ApkVersion::getPublishTime, new Date())
+                .update();
+        if (!updated) throw new BuzzException("发布版本失败，请刷新后重试");
+        return getById(id);
+    }
+
+    public ApkVersion revoke(Integer id) {
+        requireVersion(id);
+        boolean updated = lambdaUpdate()
+                .eq(ApkVersion::getId, id)
+                .eq(ApkVersion::getStatus, AppReleaseConstants.STATUS_PUBLISHED)
+                .set(ApkVersion::getStatus, AppReleaseConstants.STATUS_REVOKED)
+                .update();
+        if (!updated) throw new BuzzException("只有已发布 APK 可以撤回");
+        return getById(id);
+    }
+
+    @Override
+    public boolean removeById(Serializable id) {
+        throw new BuzzException("APK 版本历史不允许删除");
+    }
+
+    @Override
+    public void removeBatchByIds(List<Serializable> ids) {
+        throw new BuzzException("APK 版本历史不允许删除");
+    }
+
+    @Override
+    public void removePerById(Serializable id) {
+        throw new BuzzException("APK 版本历史不允许删除");
+    }
+
+    @Override
+    public void removePerByIds(Collection<? extends Serializable> ids) {
+        throw new BuzzException("APK 版本历史不允许删除");
+    }
+
+    @Override
+    public void removePerBatchByIds(List<Serializable> ids) {
+        throw new BuzzException("APK 版本历史不允许删除");
+    }
+
+    @Override
+    public void removeByQuery(com.faber.core.vo.query.QueryParams query) {
+        throw new BuzzException("APK 版本历史不允许删除");
+    }
+
+    @Override
+    public void removeMine() {
+        throw new BuzzException("APK 版本历史不允许删除");
+    }
+
+    private ApkVersion requireVersion(Integer id) {
+        if (id == null) throw new BuzzException("版本ID不能为空");
+        ApkVersion version = getById(id);
+        if (version == null) throw new BuzzException("版本ID异常，请检查");
+        return version;
     }
 
     private void validateNewVersion(ApkVersion entity) {

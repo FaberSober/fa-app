@@ -78,4 +78,20 @@ public class Apk extends BaseDelEntity {
     @ExcelProperty("强制更新")
     private Boolean forceUpdate;
 
+    /** 管理列表展示的最新已发布 APK 信息，不映射数据库字段。 */
+    @TableField(exist = false)
+    private Long publishedVersionCode;
+
+    @TableField(exist = false)
+    private String publishedVersionName;
+
+    @TableField(exist = false)
+    private String publishedFileId;
+
+    @TableField(exist = false)
+    private Long publishedSize;
+
+    @TableField(exist = false)
+    private String publishedRemark;
+
 }

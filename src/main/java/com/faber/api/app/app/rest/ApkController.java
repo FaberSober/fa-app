@@ -83,7 +83,7 @@ public class ApkController extends BaseController<ApkBiz, Apk, Integer> {
     @ResponseBody
     public Ret<Apk> getByShortCode(@RequestBody Map<String, Object> params) {
         String shortCode = MapUtil.getStr(params, "shortCode");
-        Apk data = baseBiz.getByShortCode(shortCode);
+        Apk data = baseBiz.getPublishedByShortCode(shortCode);
         return ok(data);
     }
 

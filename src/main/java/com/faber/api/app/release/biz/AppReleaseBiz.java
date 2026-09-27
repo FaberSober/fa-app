@@ -131,10 +131,9 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
     private void validateMinimumSupportedApkVersion(Apk app, Long minSupportedVersionCode) {
         if (minSupportedVersionCode == null) return;
-        boolean currentVersion = minSupportedVersionCode.equals(app.getVersionCode());
-        boolean historyVersion = apkVersionBiz.listByAppId(app.getId()).stream()
+        boolean historyVersion = apkVersionBiz.listPublishedByAppId(app.getId()).stream()
                 .anyMatch(version -> minSupportedVersionCode.equals(version.getVersionCode()));
-        if (!currentVersion && !historyVersion) {
+        if (!historyVersion) {
             throw new BuzzException("最低支持 APK 版本不属于匹配应用的历史版本");
         }
     }
@@ -222,7 +221,7 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
         Apk app = apkBiz.getByShortCode(request.getAppCode().trim());
         long currentVersionCode = request.getCurrentVersionCode();
-        ApkVersion latestVersion = apkVersionBiz.getLatestVersion(app.getId());
+        ApkVersion latestVersion = apkVersionBiz.getLatestPublishedVersion(app.getId());
         if (latestVersion == null || latestVersion.getVersionCode() == null
                 || latestVersion.getVersionCode() <= currentVersionCode) {
             return AppReleaseCheckRet.noUpdate();

@@ -1,12 +1,16 @@
 package com.faber.api.app.app.entity;
 
 import com.alibaba.excel.annotation.ExcelProperty;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.faber.core.annotation.FaModalName;
 import com.faber.core.bean.BaseDelEntity;
 import lombok.Data;
+
+import java.util.Date;
 
     
 /**
@@ -51,6 +55,14 @@ public class ApkVersion extends BaseDelEntity {
 
     @ExcelProperty("下载次数")
     private Integer downloadNum;
+
+    @ExcelProperty("发布状态")
+    @TableField(insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
+    private String status;
+
+    @ExcelProperty("发布时间")
+    @TableField(insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
+    private Date publishTime;
 
     @ExcelProperty("强制更新")
     private Boolean forceUpdate = false;

@@ -35,8 +35,20 @@ public class ApkVersionController extends BaseController<ApkVersionBiz, ApkVersi
     @ResponseBody
     public Ret<List<ApkVersion>> listByApkId(@RequestBody Map<String, Object> params) {
         Integer appId = MapUtil.getInt(params, "appId");
-        List<ApkVersion> list = baseBiz.listByAppId(appId);
+        List<ApkVersion> list = baseBiz.listPublishedByAppId(appId);
         return ok(list);
+    }
+
+    @FaLogOpr(value = "发布 APK 版本", crud = LogCrudEnum.U)
+    @PostMapping("/publish/{id}")
+    public Ret<ApkVersion> publish(@PathVariable Integer id) {
+        return ok(baseBiz.publish(id));
+    }
+
+    @FaLogOpr(value = "撤回 APK 版本", crud = LogCrudEnum.U)
+    @PostMapping("/revoke/{id}")
+    public Ret<ApkVersion> revoke(@PathVariable Integer id) {
+        return ok(baseBiz.revoke(id));
     }
 
     @IgnoreUserToken

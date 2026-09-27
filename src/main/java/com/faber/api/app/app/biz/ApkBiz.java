@@ -24,9 +24,11 @@ import jakarta.annotation.Resource;
 import java.io.File;
 import java.io.IOException;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -54,6 +56,34 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
 
     @Resource
     ApkVersionBiz apkVersionBiz;
+
+    /** 后台应用列表展示最新已发布 APK，上传中的草稿信息仍保留在应用主记录供编辑使用。 */
+    @Override
+    public void decorateList(List<Apk> list) {
+        super.decorateList(list);
+        if (list == null || list.isEmpty()) return;
+
+        Set<Integer> appIds = new HashSet<>();
+        for (Apk apk : list) {
+            if (apk.getId() != null) appIds.add(apk.getId());
+        }
+        if (appIds.isEmpty()) return;
+
+        Map<Integer, ApkVersion> latestPublishedByAppId = new HashMap<>();
+        for (ApkVersion version : apkVersionBiz.listPublishedByAppIds(appIds)) {
+            latestPublishedByAppId.putIfAbsent(version.getAppId(), version);
+        }
+
+        for (Apk apk : list) {
+            ApkVersion version = latestPublishedByAppId.get(apk.getId());
+            if (version == null) continue;
+            apk.setPublishedVersionCode(version.getVersionCode());
+            apk.setPublishedVersionName(version.getVersionName());
+            apk.setPublishedFileId(version.getFileId());
+            apk.setPublishedSize(version.getSize());
+            apk.setPublishedRemark(version.getRemark());
+        }
+    }
 
     public Apk getApkInfo(String fileId) throws IOException {
         FileSave apkFileSave = fileSaveBiz.getById(fileId);
@@ -270,14 +300,8 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
     @Transactional
     public void addLastDownloadNum(Integer id) {
         // 最新版本下载数+1
-        ApkVersion apkVersion = apkVersionBiz.getLatestVersion(id);
-        if (apkVersion != null) {
-            apkVersionBiz.addDownloadNum(apkVersion.getId());
-            return;
-        }
-
-        // 当前apk下载数+1
-        baseMapper.sumDownloadNum(id);
+        ApkVersion apkVersion = apkVersionBiz.getLatestPublishedVersion(id);
+        if (apkVersion != null) apkVersionBiz.addDownloadNum(apkVersion.getId());
     }
 
     public void sumDownloadNum(Integer id) {
@@ -294,9 +318,38 @@ public class ApkBiz extends BaseBiz<ApkMapper,Apk> {
         Apk apk = getById(id);
         if (apk == null) throw new BuzzException("APP ID异常，请检查");
 
-        ApkVersion apkVersion = apkVersionBiz.getLatestVersion(id);
-        apk.setForceUpdate(apkVersion != null && Boolean.TRUE.equals(apkVersion.getForceUpdate()));
+        ApkVersion apkVersion = apkVersionBiz.getLatestPublishedVersion(id);
+        if (apkVersion == null) throw new BuzzException("当前应用暂无已发布 APK");
+        return applyVersion(apk, apkVersion);
+    }
 
+    /** 短链公开下载信息只返回正式 APK，草稿不会进入网页分发。 */
+    public Apk getPublishedByShortCode(String shortCode) {
+        Apk apk = getByShortCode(shortCode);
+        ApkVersion apkVersion = apkVersionBiz.getLatestPublishedVersion(apk.getId());
+        if (apkVersion == null) {
+            apk.setVersionCode(null);
+            apk.setVersionName(null);
+            apk.setFileId(null);
+            apk.setSize(null);
+            apk.setDownloadNum(0);
+            apk.setRemark(null);
+            apk.setForceUpdate(false);
+            return apk;
+        }
+        return applyVersion(apk, apkVersion);
+    }
+
+    private Apk applyVersion(Apk apk, ApkVersion version) {
+        apk.setName(version.getName());
+        apk.setVersionCode(version.getVersionCode());
+        apk.setVersionName(version.getVersionName());
+        apk.setFileId(version.getFileId());
+        apk.setSize(version.getSize());
+        apk.setIconId(version.getIconId());
+        apk.setDownloadNum(version.getDownloadNum());
+        apk.setRemark(version.getRemark());
+        apk.setForceUpdate(Boolean.TRUE.equals(version.getForceUpdate()));
         return apk;
     }
 
