@@ -196,7 +196,9 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         }
         validateDraft(release, release.getId());
 
+        List<AppReleasePackage> packages = appReleasePackageBiz.listByReleaseId(id);
         appReleasePackageBiz.validatePublishPackages(id);
+        validateWgtRepairVersion(release, packages);
 
         release.setStatus(AppReleaseConstants.STATUS_PUBLISHED);
         release.setPublishTime(new Date());
@@ -326,6 +328,33 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         AppRelease release = getById(id);
         if (release == null) throw new BuzzException("版本发布ID异常，请检查");
         return release;
+    }
+
+    /** 已撤回的较高 WGT 可能仍安装在用户设备上，修复版本必须高于所有已发布或已撤回版本。 */
+    private void validateWgtRepairVersion(AppRelease release, List<AppReleasePackage> packages) {
+        boolean wgtPackage = packages.stream().anyMatch(packageInfo ->
+                AppReleaseConstants.PLATFORM_APP_PLUS.equals(packageInfo.getPlatform())
+                        && AppReleaseConstants.PACKAGE_WGT.equals(packageInfo.getPackageType()));
+        if (!wgtPackage) return;
+
+        List<AppRelease> higherReleaseCandidates = lambdaQuery()
+                .eq(AppRelease::getAppId, release.getAppId())
+                .eq(AppRelease::getChannel, release.getChannel())
+                .in(AppRelease::getStatus,
+                        AppReleaseConstants.STATUS_PUBLISHED,
+                        AppReleaseConstants.STATUS_REVOKED)
+                .gt(AppRelease::getVersionCode, release.getVersionCode())
+                .orderByDesc(AppRelease::getVersionCode)
+                .list();
+
+        for (AppRelease candidate : higherReleaseCandidates) {
+            boolean isWgt = appReleasePackageBiz.listByReleaseId(candidate.getId()).stream().anyMatch(packageInfo ->
+                    AppReleaseConstants.PLATFORM_APP_PLUS.equals(packageInfo.getPlatform())
+                            && AppReleaseConstants.PACKAGE_WGT.equals(packageInfo.getPackageType()));
+            if (isWgt) {
+                throw new BuzzException("修复 WGT 版本号必须高于同渠道已发布或已撤回的最高 WGT 版本");
+            }
+        }
     }
 
     private void validateDraft(AppRelease entity, Long excludeId) {
