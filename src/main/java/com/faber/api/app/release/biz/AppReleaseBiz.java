@@ -22,6 +22,7 @@ import com.faber.api.app.release.vo.req.AppReleaseAutoMatchReq;
 import com.faber.api.app.release.vo.ret.AppReleaseAutoMatchRet;
 import com.faber.api.app.release.vo.ret.AppReleaseAutoMatchPreviewRet;
 import com.faber.api.app.release.vo.ret.AppReleaseCheckRet;
+import com.faber.core.config.scheduler.SchedulerStartupGate;
 import com.faber.core.exception.BuzzException;
 import com.faber.core.web.biz.BaseBiz;
 import jakarta.annotation.Resource;
@@ -58,6 +59,9 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
     @Resource
     ClientErrorEventMapper clientErrorEventMapper;
+
+    @Resource
+    SchedulerStartupGate schedulerStartupGate;
 
     @Override
     public boolean save(AppRelease entity) {
@@ -293,6 +297,8 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
     @Scheduled(fixedDelayString = "${fa.app.release.rollback-check-interval-ms:60000}")
     @Transactional(rollbackFor = Exception.class)
     public void checkAutoRollback() {
+        if (!schedulerStartupGate.isReady()) return;
+
         List<AppRelease> releases = lambdaQuery()
                 .eq(AppRelease::getStatus, AppReleaseConstants.STATUS_PUBLISHED)
                 .eq(AppRelease::getAutoRollback, true)
