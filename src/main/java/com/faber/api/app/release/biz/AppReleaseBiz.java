@@ -232,20 +232,36 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
         if (current.getWgtMetadataJson() != null && (!java.util.Objects.equals(current.getAppId(), entity.getAppId())
                 || !java.util.Objects.equals(current.getVersionCode(), entity.getVersionCode())
-                || !java.util.Objects.equals(current.getVersionName(), entity.getVersionName())
-                || !java.util.Objects.equals(current.getMinSupportedVersionCode(), entity.getMinSupportedVersionCode()))) {
-            throw new BuzzException("WGT应用、资源版本和APK基座不可修改，请重新上传创建草稿");
+                || !java.util.Objects.equals(current.getVersionName(), entity.getVersionName()))) {
+            throw new BuzzException("WGT应用和资源版本不可修改，请重新上传创建草稿");
         }
         entity.setRuntimeType(current.getRuntimeType());
         entity.setPlatform(current.getPlatform());
         entity.setNativeBaseReportFileId(current.getNativeBaseReportFileId());
         entity.setWgtMetadataJson(current.getWgtMetadataJson());
         entity.setWgtBuildReportJson(current.getWgtBuildReportJson());
+        if (current.getWgtMetadataJson() != null) {
+            configureWgtDraftCompatibility(entity);
+            try { vaporCompatibilityBiz.validateRelease(entity); }
+            catch (IOException error) { throw new BuzzException("原生基座报告读取失败，请检查报告文件"); }
+        }
         normalizeDefaults(entity);
         validateDraft(entity, entity.getId());
         entity.setStatus(AppReleaseConstants.STATUS_DRAFT);
         entity.setPublishTime(null);
         return super.updateById(entity);
+    }
+
+    /** 最低APK由后台选择；报告引用只能由服务端从对应APK派生。 */
+    void configureWgtDraftCompatibility(AppRelease release) {
+        release.setNativeBaseReportFileId(null);
+        if (release.getMinSupportedVersionCode() == null) return;
+        var version = apkVersionBiz.listPublishedByAppId(release.getAppId()).stream()
+                .filter(apk -> java.util.Objects.equals(apk.getVersionCode(), release.getMinSupportedVersionCode()))
+                .findFirst().orElseThrow(() -> new BuzzException("最低支持 APK 版本不属于本应用已发布的历史版本"));
+        if (VaporCompatibilityBiz.VAPOR.equals(release.getRuntimeType()) && release.getWgtBuildReportJson() != null) {
+            release.setNativeBaseReportFileId(version.getNativeBaseReportFileId());
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)

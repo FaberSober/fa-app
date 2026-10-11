@@ -1,6 +1,8 @@
 package com.faber.api.app.release.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.faber.core.annotation.FaModalName;
@@ -38,6 +40,7 @@ public class AppRelease extends BaseDelEntity {
     @SqlEquals
     private String platform = "APP_PLUS";
 
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String nativeBaseReportFileId;
 
     /** 服务端从原始包解析的兼容元数据。 */
@@ -66,6 +69,7 @@ public class AppRelease extends BaseDelEntity {
     private Boolean forceUpdate = false;
 
     /** WGT 可选最低兼容 APK versionCode；为空表示不限制。 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Long minSupportedVersionCode;
 
     /** 按安装标识稳定分流的百分比，100表示全量。 */

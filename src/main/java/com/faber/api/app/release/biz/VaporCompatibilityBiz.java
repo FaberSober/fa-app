@@ -77,8 +77,9 @@ public class VaporCompatibilityBiz {
 
     void validateRelease(AppRelease release) throws IOException {
         if (!VAPOR.equals(release.getRuntimeType())) return;
-        // 人工上传以实际WGT为准；只有附带CI报告时才校验原生构建证据。
-        if (release.getNativeBaseReportFileId() == null && release.getWgtBuildReportJson() == null) return;
+        // 构建报告可单独上传；后台选择了有报告的APK后才校验原生兼容性。
+        if (release.getWgtBuildReportJson() != null) validateEvidence(JSON.readTree(release.getWgtBuildReportJson()));
+        if (release.getNativeBaseReportFileId() == null) return;
         if (release.getMinSupportedVersionCode() == null || release.getNativeBaseReportFileId() == null
                 || release.getWgtBuildReportJson() == null) fail("Vapor发布需要最低APK版本、已注册的基座报告和WGT构建报告");
         ApkVersion base = apkVersionBiz.listPublishedByAppId(release.getAppId()).stream()
@@ -96,7 +97,7 @@ public class VaporCompatibilityBiz {
     }
 
     boolean compatibleWithApk(AppRelease release, long apkCode) {
-        if (release.getNativeBaseReportFileId() == null && release.getWgtBuildReportJson() == null) return true;
+        if (release.getNativeBaseReportFileId() == null) return true;
         try {
             ApkVersion installed = apkVersionBiz.listPublishedByAppId(release.getAppId()).stream()
                     .filter(v -> Objects.equals(v.getVersionCode(), apkCode)).findFirst().orElse(null);

@@ -178,6 +178,7 @@ class WgtCompatibilityTest {
         assertThrows(BuzzException.class, () -> service.register(1, multipart(VaporCompatibilityBiz.JSON.writeValueAsBytes(noInstaller))));
         var release = new com.faber.api.app.release.entity.AppRelease();
         release.setAppId(1); release.setRuntimeType("UNI_APP_X_VAPOR"); release.setPlatform("ANDROID");
+        release.setNativeBaseReportFileId("base");
         release.setWgtBuildReportJson(VaporCompatibilityBiz.JSON.writeValueAsString(evidence()));
         assertTrue(service.compatibleWithApk(release, 39));
         assertFalse(service.compatibleWithApk(release, 99));
@@ -185,7 +186,7 @@ class WgtCompatibilityTest {
         assertFalse(service.compatibleWithApk(release, 39));
     }
 
-    @Test void manualVaporUploadDoesNotRequireCiReportsButPartialReportsAreRejected() throws Exception {
+    @Test void wgtBuildReportCanBeUploadedWithoutNativeBaseButInvalidReportsAreRejected() throws Exception {
         var service = new VaporCompatibilityBiz();
         var release = new com.faber.api.app.release.entity.AppRelease();
         release.setRuntimeType("UNI_APP_X_VAPOR");
@@ -203,7 +204,38 @@ class WgtCompatibilityTest {
         release.setNativeBaseReportFileId(null);
         release.setWgtBuildReportJson("{}");
         assertThrows(BuzzException.class, () -> service.validateRelease(release));
-        assertFalse(service.compatibleWithApk(release, 39));
+        release.setWgtBuildReportJson(VaporCompatibilityBiz.JSON.writeValueAsString(evidence()));
+        service.validateRelease(release);
+        assertTrue(service.compatibleWithApk(release, 39));
+        assertTrue(service.compatibleWithApk(release, 99));
+        byte[] bytes = Files.readAllBytes(file);
+        var report = evidence().put("sha256", cn.hutool.crypto.digest.DigestUtil.sha256Hex(bytes)).put("size", bytes.length);
+        service.prepare(release, metadata, multipart(VaporCompatibilityBiz.JSON.writeValueAsBytes(report)), multipart(bytes));
+        assertNotNull(release.getWgtBuildReportJson());
+        report.put("sha256", "b".repeat(64));
+        assertThrows(BuzzException.class, () -> service.prepare(release, metadata,
+                multipart(VaporCompatibilityBiz.JSON.writeValueAsBytes(report)), multipart(bytes)));
+    }
+
+    @Test void draftMinimumApkAutomaticallyBindsRegisteredReportAndCanBeCleared() {
+        var service = new AppReleaseBiz();
+        service.apkVersionBiz = org.mockito.Mockito.mock(com.faber.api.app.app.biz.ApkVersionBiz.class);
+        var apk = new com.faber.api.app.app.entity.ApkVersion();
+        apk.setVersionCode(39L); apk.setNativeBaseReportFileId("registered-base");
+        org.mockito.Mockito.when(service.apkVersionBiz.listPublishedByAppId(1)).thenReturn(List.of(apk));
+        var release = new com.faber.api.app.release.entity.AppRelease();
+        release.setAppId(1); release.setRuntimeType("UNI_APP_X_VAPOR"); release.setWgtBuildReportJson("report");
+        release.setMinSupportedVersionCode(39L); release.setNativeBaseReportFileId("untrusted-id");
+        service.configureWgtDraftCompatibility(release);
+        assertEquals("registered-base", release.getNativeBaseReportFileId());
+        release.setMinSupportedVersionCode(null);
+        service.configureWgtDraftCompatibility(release);
+        assertNull(release.getNativeBaseReportFileId());
+        release.setMinSupportedVersionCode(99L);
+        assertThrows(BuzzException.class, () -> service.configureWgtDraftCompatibility(release));
+        release.setMinSupportedVersionCode(39L); release.setWgtBuildReportJson(null);
+        service.configureWgtDraftCompatibility(release);
+        assertNull(release.getNativeBaseReportFileId());
     }
 
     private org.springframework.mock.web.MockMultipartFile multipart(byte[] bytes) {
