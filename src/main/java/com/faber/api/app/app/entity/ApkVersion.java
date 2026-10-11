@@ -70,6 +70,10 @@ public class ApkVersion extends BaseDelEntity {
     @ExcelProperty("SHA-256")
     private String sha256;
 
+    /** 经校验且绑定本 APK 摘要的 Vapor 原生基座报告。 */
+    @TableField(insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
+    private String nativeBaseReportFileId;
+
     @ExcelProperty("版本信息")
     private String remark;
 

@@ -55,6 +55,13 @@ public class ApkVersionBiz extends BaseBiz<ApkVersionMapper,ApkVersion> {
                 .list();
     }
 
+    /** CI上传APK先成为草稿；登记报告不改变APK发布状态。 */
+    public List<ApkVersion> listNativeBaseCandidates(Integer appId) {
+        return lambdaQuery().eq(ApkVersion::getAppId, appId)
+                .in(ApkVersion::getStatus, AppReleaseConstants.STATUS_DRAFT, AppReleaseConstants.STATUS_PUBLISHED)
+                .orderByDesc(ApkVersion::getId).list();
+    }
+
     /** 批量查询多个 APP 的正式 APK，并按 APP 和版本号降序排列。 */
     public List<ApkVersion> listPublishedByAppIds(Collection<Integer> appIds) {
         return lambdaQuery()
@@ -123,6 +130,12 @@ public class ApkVersionBiz extends BaseBiz<ApkVersionMapper,ApkVersion> {
     public boolean updateById(ApkVersion entity) {
         ApkVersion current = getById(entity.getId());
         if (current == null) throw new BuzzException("版本ID异常，请检查");
+        if (current.getNativeBaseReportFileId() != null
+                && ((entity.getFileId() != null && !Objects.equals(entity.getFileId(), current.getFileId()))
+                || (entity.getApplicationId() != null && !Objects.equals(entity.getApplicationId(), current.getApplicationId()))
+                || (entity.getVersionName() != null && !Objects.equals(entity.getVersionName(), current.getVersionName())))) {
+            throw new BuzzException("已绑定原生基座报告的APK文件、包名及版本名称不可修改，请上传新APK");
+        }
         if (entity.getStatus() != null && !Objects.equals(entity.getStatus(), current.getStatus())) {
             throw new BuzzException("发布状态请使用发布或撤回操作修改");
         }

@@ -28,6 +28,7 @@ public class AppReleasePackageController extends BaseController<AppReleasePackag
 
     @FaLogOpr(value = "按版本查询发布包", crud = LogCrudEnum.R)
     @GetMapping("/byRelease/{releaseId}")
+    @com.faber.core.config.annotation.ApiToken
     public Ret<List<AppReleasePackage>> byRelease(@PathVariable Long releaseId) {
         return ok(baseBiz.listByReleaseId(releaseId));
     }

@@ -10,6 +10,9 @@ import lombok.Data;
 @Data
 public class AppReleaseCheckReq {
 
+    @Size(max = 32)
+    private String runtimeType = "APP_PLUS";
+
     @NotBlank
     @Size(max = 64)
     private String appCode;

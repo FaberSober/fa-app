@@ -9,5 +9,7 @@ public record AppReleaseAutoMatchPreviewRet(
         String currentApkVersionCode,
         String currentApkVersionName,
         String wgtVersionName,
-        String wgtVersionCode
+        String wgtVersionCode,
+        String runtimeType,
+        String platform
 ) {}

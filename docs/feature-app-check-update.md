@@ -1,6 +1,21 @@
 # APP 更新流程说明
 
-本文说明 APP-PLUS Android 客户端的 APK 与 WGT 更新流程。架构决策和开发进度见 [ADR-app-003](adrs/ADR-app-003-app-plus-package-publishing.md)。
+本文说明普通 uni-app（APP-PLUS）和 Android uni-app X Vapor 的发布契约。旧客户端流程及架构决策见 [ADR-app-003](adrs/ADR-app-003-app-plus-package-publishing.md)，Vapor进度见 `mobile-x/docs/plans/PLAN-mobile-x-012-wgt-release-and-update-1011.md`。下文原有APK/WGT规则适用于APP-PLUS；Vapor扩展见下一节。
+
+## Android Vapor WGT 扩展
+
+- 后端自动识别普通ZIP与Zstandard封装的Vapor ZIP；Vapor目前只接受Android、编译器/最低Runtime `5.31`、`www/`下stored条目、完整启动资源及字节码。不以扩展名或调用方声明判断运行时。
+- `app_release.runtime_type/platform` 默认 `APP_PLUS/APP_PLUS`，历史数据无需重建。唯一键扩展为应用+运行时+平台+资源编码+渠道。普通uni-app上传、下载、检查和撤回接口保持兼容。
+- `POST release/registerNativeBaseReport`：multipart `appId`、`file`（APK Jenkins `.verification.json`），校验报告AppID、已上传且未撤回APK版本及原始文件SHA-256；仅包含安装模块的APK可注册，返回 `nativeBaseReportFileId`、`apkVersionCode`。APK原生报告与WGT报告不同，不能互相代替，注册后不可替换。
+- 报告包含 `appId`（DCloud ID）、`runtimeType=UNI_APP_X_VAPOR`、`platform=ANDROID`、资源版本、`compilerVersion/minRuntimeVersion=5.31`、完整 `cliVersion`、`sdkSha256`、`nativeRequirementsHash`、`modules` 和原始包 `sha256`；WGT报告另含 `size`。报告只能由可信CI产生，指纹包含源Android配置、UTS原生插件与宿主提交，不能人工声明兼容。
+- `POST release/createWgtDraft`：人工上传只需 `appId/file`，更新说明可选，留空自动生成。服务端自动识别运行时、平台、版本并验证AppID，最低APK和报告均非人工上传必填项。Jenkins仍可提交 `buildReport/nativeBaseReportFileId/minSupportedVersionCode`，一旦提交报告就必须完整且匹配已发布APK，保留原有原生指纹/SDK/CLI及模块兼容校验。显式声明运行时/平台与实际包不一致时拒绝。旧自动匹配入口仍仅支持普通uni-app。
+- `GET release/forPublish/{id}`、`GET releasePackage/byRelease/{id}`、上述上传/注册及 `POST release/publish/{id}` 支持现有FaApiToken。发布重新读取原始WGT核对版本、平台、运行时、摘要和报告；已撤回的资源也计入修复版本上限，同运行时/平台/渠道的修复版本不得降低。
+- `POST release/checkWgt`：旧请求未传 `runtimeType` 时默认APP_PLUS，资源编码缺失时沿用旧APK编码回退。Vapor必须明确传 `runtimeType=UNI_APP_X_VAPOR`、`platform=ANDROID`、`currentVersionCode`（原生APK）、`currentWgtVersionCode`（实际资源）；缺失资源编码或平台不符时不下发；附带CI报告的发布另要求已注册且兼容的APK，人工上传不依赖报告注册。灰度、最低APK、草稿/发布/撤回规则继续生效。更新响应增加 `runtimeType/platform/nativeBaseReportFileId/minRuntimeVersion`。
+- 管理页支持运行时选择、报告注册/上传和发布确认。解析所得版本及基座信息不可通过普通编辑改写；原生能力变化需要先发布新APK。客户端的实际安装、摘要验证、重启另由WG01-02b/WG03验收，本后端变更不赋予旧APK安装能力。
+
+升级脚本：`sql/fa-app/mysql/1.0.13_app_ddl.sql` 和 `sql/fa-app/postgre/1.0.13_app_ddl.sql`。上线前确认迁移成功，先回归旧uni-app，再验证Vapor草稿/发布与隔离。
+
+APK上传仍创建草稿，基座报告可在上传后注册，注册不会发布APK。使用CI报告流程时，请在管理端发布该APK后再创建Vapor WGT草稿；撤回APK后该基座不再参与该流程的WGT下发。人工上传仅能从WGT验证资源清单，无法据此确认实际APK内的原生模块及UTS插件兼容性，新增原生能力仍需重建APK。SDK中安装模块的实际标识是 `uni-install-wgt`（对应API `uni.installWgt`），以配套编译器的模块表和SDK AAR为准。
 
 ## 1. 更新类型
 

@@ -32,6 +32,20 @@ public class AppRelease extends BaseDelEntity {
     @SqlEquals
     private Integer appId;
 
+    @SqlEquals
+    private String runtimeType = "APP_PLUS";
+
+    @SqlEquals
+    private String platform = "APP_PLUS";
+
+    private String nativeBaseReportFileId;
+
+    /** 服务端从原始包解析的兼容元数据。 */
+    private String wgtMetadataJson;
+
+    /** 经发布凭据上传的构建报告，不能替代原始包校验。 */
+    private String wgtBuildReportJson;
+
     @NotBlank
     @SqlSearch
     private String versionName;

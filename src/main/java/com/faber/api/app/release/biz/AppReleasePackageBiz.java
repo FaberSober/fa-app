@@ -88,14 +88,28 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
                 throw new BuzzException("发布包文件大小与记录不一致，请重新上传");
             }
             if (AppReleaseConstants.PACKAGE_WGT.equals(packageInfo.getPackageType())) {
-                try (InputStream input = Files.newInputStream(fileSaveBiz.getFileObj(fileSave).toPath())) {
+                File original = fileSaveBiz.getFileObj(fileSave);
+                try (InputStream input = Files.newInputStream(original.toPath())) {
                     String actualSha256 = calculateSha256(input);
                     if (!packageInfo.getSha256().equalsIgnoreCase(actualSha256)) {
                         throw new BuzzException("WGT文件SHA-256校验失败，请重新上传");
                     }
+                    WgtMetadata metadata = readWgtMetadata(original);
+                    validateWgtMetadata(metadata, release);
+                    // JSON读取会将小整数还原为IntNode，不能与Long字段的树节点直接比较。
+                    if (release.getWgtMetadataJson() != null && !OBJECT_MAPPER
+                            .readValue(release.getWgtMetadataJson(), WgtMetadata.class)
+                            .equals(metadata)) throw new BuzzException("WGT原始元数据与草稿记录不一致");
+                    if (VaporCompatibilityBiz.VAPOR.equals(metadata.runtimeType()) && release.getWgtBuildReportJson() != null) {
+                        JsonNode report = OBJECT_MAPPER.readTree(release.getWgtBuildReportJson());
+                        VaporCompatibilityBiz.validateBuildReport(report, metadata);
+                        if (!actualSha256.equals(report.path("sha256").asText()) || original.length() != report.path("size").asLong()) {
+                            throw new BuzzException("WGT构建报告与发布包不一致");
+                        }
+                    }
                 } catch (IOException e) {
                     throw new BuzzException("WGT文件读取失败，请重新上传");
-                }
+                } finally { deleteRemoteTempFile(fileSave, original); }
             }
         }
     }
@@ -114,7 +128,7 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
 
         AppReleasePackage candidate = new AppReleasePackage();
         candidate.setReleaseId(releaseId);
-        candidate.setPlatform(AppReleaseConstants.PLATFORM_APP_PLUS);
+        candidate.setPlatform(metadata.platform());
         candidate.setPackageType(AppReleaseConstants.PACKAGE_WGT);
         candidate.setBaseVersionCode(null);
         validateUnique(candidate, null);
@@ -148,7 +162,7 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
 
         AppReleasePackage candidate = new AppReleasePackage();
         candidate.setReleaseId(releaseId);
-        candidate.setPlatform(AppReleaseConstants.PLATFORM_APP_PLUS);
+        candidate.setPlatform(metadata.platform());
         candidate.setPackageType(AppReleaseConstants.PACKAGE_WGT);
         candidate.setBaseVersionCode(null);
         validateUnique(candidate, null);
@@ -183,9 +197,10 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         }
     }
 
-    private WgtMetadata readWgtMetadata(File file) throws IOException {
-        try (ZipFile zip = new ZipFile(file, StandardCharsets.UTF_8)) {
-            ZipEntry manifest = findManifest(zip);
+    WgtMetadata readWgtMetadata(File file) throws IOException {
+        try (WgtArchive archive = WgtArchive.open(file);
+             ZipFile zip = new ZipFile(archive.file, StandardCharsets.UTF_8)) {
+            ZipEntry manifest = archive.vapor ? zip.getEntry("www/manifest.json") : findManifest(zip);
             if (manifest == null) throw new BuzzException("WGT包中未找到manifest.json，无法识别资源版本");
             byte[] content;
             try (InputStream input = zip.getInputStream(manifest)) {
@@ -204,7 +219,27 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
                 throw new BuzzException("WGT包内manifest.json缺少有效的资源版本名称或版本编码");
             }
             try {
-                return new WgtMetadata(dcloudAppId, versionName.trim(), Long.parseLong(versionCodeText));
+                long code = Long.parseLong(versionCodeText);
+                if (!archive.vapor) {
+                    if (root.path("uni-app-x").path("vapor").asBoolean(false)) throw new BuzzException("Vapor包必须为Zstandard格式");
+                    return new WgtMetadata(dcloudAppId, versionName.trim(), code);
+                }
+                JsonNode vapor = root.path("uni-app-x");
+                if (dcloudAppId == null || !dcloudAppId.matches("__UNI__[A-Za-z0-9]+")
+                        || !dcloudAppId.equals(root.path("id").asText()) || !vapor.path("vapor").asBoolean(false)
+                        || !"5.31".equals(vapor.path("compilerVersion").asText())
+                        || !"5.31".equals(vapor.path("minRuntimeVersion").asText())
+                        || !root.has("app-android") || root.has("app-ios") || root.has("app-harmony")
+                        || code > Integer.MAX_VALUE || zip.getEntry("www/app-service.js") == null || zip.getEntry("www/app-config.js") == null
+                        || zip.getEntry("www/app-service.js").getSize() < 1 || zip.getEntry("www/app-config.js").getSize() < 1) {
+                    throw new BuzzException("不支持的Vapor平台/编译器/Runtime或启动资源缺失");
+                }
+                boolean bytecode = zip.stream().anyMatch(entry -> entry.getName().startsWith("www/bytes/") && entry.getName().endsWith(".bytes") && entry.getSize() > 0);
+                if (!bytecode) throw new BuzzException("Vapor包缺少字节码");
+                List<String> modules = new java.util.ArrayList<>();
+                root.path("app-android").path("distribute").path("modules").fieldNames().forEachRemaining(modules::add);
+                if (modules.isEmpty()) throw new BuzzException("Vapor包缺少原生模块元数据");
+                return new WgtMetadata(dcloudAppId, versionName.trim(), code, "UNI_APP_X_VAPOR", "ANDROID", "5.31", "5.31", modules);
             } catch (NumberFormatException error) {
                 throw new BuzzException("WGT包内资源版本编码超出支持范围");
             }
@@ -298,6 +333,10 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
     }
 
     private void validatePackage(AppReleasePackage entity, AppRelease release) {
+        if (VaporCompatibilityBiz.VAPOR.equals(release.getRuntimeType())
+                && (!"ANDROID".equals(entity.getPlatform()) || !"WGT".equals(entity.getPackageType()))) {
+            throw new BuzzException("Vapor发布仅支持Android WGT包");
+        }
         if (entity.getPlatform() == null || !AppReleaseConstants.PLATFORMS.contains(entity.getPlatform())) {
             throw new BuzzException("不支持的发布平台");
         }
@@ -307,7 +346,8 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         boolean validPlatformPackage = switch (entity.getPlatform()) {
             case AppReleaseConstants.PLATFORM_ANDROID ->
                     AppReleaseConstants.PACKAGE_APK.equals(entity.getPackageType())
-                            || AppReleaseConstants.PACKAGE_FULL.equals(entity.getPackageType());
+                            || AppReleaseConstants.PACKAGE_FULL.equals(entity.getPackageType())
+                            || ("UNI_APP_X_VAPOR".equals(release.getRuntimeType()) && AppReleaseConstants.PACKAGE_WGT.equals(entity.getPackageType()));
             case AppReleaseConstants.PLATFORM_IOS ->
                     AppReleaseConstants.PACKAGE_IPA.equals(entity.getPackageType())
                             || AppReleaseConstants.PACKAGE_FULL.equals(entity.getPackageType());
@@ -319,6 +359,7 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
             default -> false;
         };
         if (!validPlatformPackage) throw new BuzzException("平台与发布包类型不匹配");
+        if (AppReleaseConstants.PACKAGE_WGT.equals(entity.getPackageType()) && !entity.getPlatform().equals(release.getPlatform())) throw new BuzzException("WGT平台与发布记录不一致");
 
         if (!AppReleaseConstants.PACKAGE_WGT.equals(entity.getPackageType())
                 && entity.getBaseVersionCode() != null) {
@@ -352,6 +393,7 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
             throw new BuzzException("WGT资源版本" + packageVersion + "与发布目标"
                     + release.getVersionName() + "（" + release.getVersionCode() + "）不一致");
         }
+        if (!metadata.runtimeType().equals(release.getRuntimeType()) || !metadata.platform().equals(release.getPlatform())) throw new BuzzException("WGT运行时或平台与草稿不一致");
     }
 
     private ZipEntry findManifest(ZipFile zip) {
@@ -428,7 +470,10 @@ public class AppReleasePackageBiz extends BaseBiz<AppReleasePackageMapper, AppRe
         return text == null || text.isBlank() ? null : text.trim();
     }
 
-    public record WgtMetadata(String dcloudAppId, String versionName, Long versionCode) {}
+    public record WgtMetadata(String dcloudAppId, String versionName, Long versionCode,
+                              String runtimeType, String platform, String compilerVersion, String minRuntimeVersion, List<String> modules) {
+        public WgtMetadata(String appId, String name, Long code) { this(appId, name, code, "APP_PLUS", "APP_PLUS", null, null, List.of()); }
+    }
 
     private void validateWgtFile(MultipartFile file) {
         if (file == null || file.isEmpty()) throw new BuzzException("WGT文件不能为空");

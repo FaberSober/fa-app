@@ -63,8 +63,26 @@ public class AppReleaseController extends BaseController<AppReleaseBiz, AppRelea
                                           @RequestParam(required = false) Long minSupportedVersionCode,
                                           @RequestParam(defaultValue = "stable") String channel,
                                           @RequestParam(required = false) String releaseNote,
+                                          @RequestParam(required = false) String runtimeType,
+                                          @RequestParam(required = false) String platform,
+                                          @RequestParam(required = false) String nativeBaseReportFileId,
+                                          @RequestParam(required = false) MultipartFile buildReport,
                                           @RequestParam("file") MultipartFile file) throws IOException {
-        return ok(baseBiz.createWgtDraft(appId, minSupportedVersionCode, channel, releaseNote, file));
+        return ok(baseBiz.createWgtDraft(appId, minSupportedVersionCode, channel, releaseNote, file,
+                runtimeType, platform, nativeBaseReportFileId, buildReport));
+    }
+
+    @ApiToken
+    @PostMapping("/registerNativeBaseReport")
+    public Ret<com.faber.api.app.release.biz.VaporCompatibilityBiz.NativeBaseRet> registerNativeBaseReport(
+            @RequestParam Integer appId, @RequestParam MultipartFile file) throws IOException {
+        return ok(baseBiz.registerNativeBaseReport(appId, file));
+    }
+
+    @ApiToken
+    @org.springframework.web.bind.annotation.GetMapping("/forPublish/{id}")
+    public Ret<AppRelease> forPublish(@PathVariable Long id) {
+        return ok(baseBiz.getById(id));
     }
 
     @FaLogOpr(value = "上传WGT并自动匹配应用", crud = LogCrudEnum.C)

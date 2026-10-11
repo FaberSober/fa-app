@@ -19,6 +19,10 @@ public class AppReleaseCheckRet {
     private Long size;
     private String sha256;
     private String releaseNote;
+    private String runtimeType;
+    private String platform;
+    private String nativeBaseReportFileId;
+    private String minRuntimeVersion;
 
     public static AppReleaseCheckRet noUpdate() {
         AppReleaseCheckRet result = new AppReleaseCheckRet();

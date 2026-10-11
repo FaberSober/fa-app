@@ -54,6 +54,9 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
     AppReleasePackageBiz appReleasePackageBiz;
 
     @Resource
+    VaporCompatibilityBiz vaporCompatibilityBiz;
+
+    @Resource
     TelemetryAppBiz telemetryAppBiz;
 
     @Resource
@@ -61,6 +64,10 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
     @Override
     public boolean save(AppRelease entity) {
+        if (!"APP_PLUS".equals(entity.getRuntimeType()) || entity.getNativeBaseReportFileId() != null
+                || entity.getWgtMetadataJson() != null || entity.getWgtBuildReportJson() != null) {
+            throw new BuzzException("Vapor草稿及兼容元数据请通过WGT上传接口创建");
+        }
         normalizeDefaults(entity);
         validateDraft(entity, null);
         entity.setStatus(AppReleaseConstants.STATUS_DRAFT);
@@ -75,6 +82,34 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         Apk app = apkBiz.getById(appId);
         if (app == null) throw new BuzzException("APP ID异常，请检查");
         return createWgtDraft(app, minSupportedVersionCode, channel, releaseNote, file, metadata);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public AppRelease createWgtDraft(Integer appId, Long minimum, String channel, String note,
+                                    MultipartFile file, String runtimeType, String platform,
+                                    String nativeBaseReportFileId, MultipartFile buildReport) throws IOException {
+        var metadata = appReleasePackageBiz.readWgtMetadata(file);
+        if (runtimeType != null && !runtimeType.equals(metadata.runtimeType())
+                || platform != null && !platform.equals(metadata.platform())) throw new BuzzException("声明的运行时或平台与WGT包不一致");
+        var app = apkBiz.getById(appId);
+        if (app == null) throw new BuzzException("APP ID异常，请检查");
+        if (!VaporCompatibilityBiz.VAPOR.equals(metadata.runtimeType())) {
+            return createWgtDraft(app, minimum, channel, note, file, metadata);
+        }
+        validateWgtAppId(app, metadata);
+        var release = wgtDraft(app, minimum, channel, note, metadata);
+        validateMinimumSupportedApkVersion(app, minimum);
+        release.setNativeBaseReportFileId(nativeBaseReportFileId);
+        vaporCompatibilityBiz.prepare(release, metadata, buildReport, file);
+        normalizeDefaults(release);
+        validateDraft(release, null);
+        if (!super.save(release)) throw new BuzzException("创建WGT发布草稿失败");
+        appReleasePackageBiz.uploadWgt(release.getId(), file, metadata);
+        return release;
+    }
+
+    public VaporCompatibilityBiz.NativeBaseRet registerNativeBaseReport(Integer appId, MultipartFile file) throws IOException {
+        return vaporCompatibilityBiz.register(appId, file);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -103,7 +138,7 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
                 app.getVersionCode() == null ? null : app.getVersionCode().toString(),
                 app.getVersionName(),
                 metadata.versionName(),
-                metadata.versionCode().toString()
+                metadata.versionCode().toString(), metadata.runtimeType(), metadata.platform()
         );
     }
 
@@ -149,15 +184,29 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
     private AppRelease createWgtDraftRecord(Apk app, Long minSupportedVersionCode, String channel,
                                             String releaseNote,
                                             AppReleasePackageBiz.WgtMetadata metadata) {
+        if (VaporCompatibilityBiz.VAPOR.equals(metadata.runtimeType())) throw new BuzzException("Vapor包请使用支持原生基座报告的新建WGT热更新入口");
+        AppRelease release = wgtDraft(app, minSupportedVersionCode, channel, releaseNote, metadata);
+        normalizeDefaults(release);
+        validateDraft(release, null);
+        if (!super.save(release)) throw new BuzzException("创建WGT发布草稿失败，请重试");
+        return release;
+    }
+
+    private AppRelease wgtDraft(Apk app, Long minSupportedVersionCode, String channel, String releaseNote,
+                               AppReleasePackageBiz.WgtMetadata metadata) {
         validateWgtAppId(app, metadata);
         AppRelease release = new AppRelease();
         release.setAppId(app.getId());
         release.setVersionName(metadata.versionName());
         release.setVersionCode(metadata.versionCode());
         release.setChannel(channel == null || channel.isBlank() ? "stable" : channel.trim());
-        release.setReleaseNote(trimToNull(releaseNote));
+        release.setReleaseNote(releaseNote == null || releaseNote.isBlank()
+                ? "资源更新 " + metadata.versionName() : releaseNote.trim());
         release.setMinSupportedVersionCode(minSupportedVersionCode);
-        if (!save(release)) throw new BuzzException("创建WGT发布草稿失败，请重试");
+        release.setRuntimeType(metadata.runtimeType());
+        release.setPlatform(metadata.platform());
+        try { release.setWgtMetadataJson(VaporCompatibilityBiz.JSON.writeValueAsString(metadata)); }
+        catch (IOException error) { throw new BuzzException("WGT元数据序列化失败"); }
         return release;
     }
 
@@ -181,6 +230,17 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
             throw new BuzzException("发布状态请使用发布或撤回接口修改");
         }
 
+        if (current.getWgtMetadataJson() != null && (!java.util.Objects.equals(current.getAppId(), entity.getAppId())
+                || !java.util.Objects.equals(current.getVersionCode(), entity.getVersionCode())
+                || !java.util.Objects.equals(current.getVersionName(), entity.getVersionName())
+                || !java.util.Objects.equals(current.getMinSupportedVersionCode(), entity.getMinSupportedVersionCode()))) {
+            throw new BuzzException("WGT应用、资源版本和APK基座不可修改，请重新上传创建草稿");
+        }
+        entity.setRuntimeType(current.getRuntimeType());
+        entity.setPlatform(current.getPlatform());
+        entity.setNativeBaseReportFileId(current.getNativeBaseReportFileId());
+        entity.setWgtMetadataJson(current.getWgtMetadataJson());
+        entity.setWgtBuildReportJson(current.getWgtBuildReportJson());
         normalizeDefaults(entity);
         validateDraft(entity, entity.getId());
         entity.setStatus(AppReleaseConstants.STATUS_DRAFT);
@@ -198,6 +258,8 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
         List<AppReleasePackage> packages = appReleasePackageBiz.listByReleaseId(id);
         appReleasePackageBiz.validatePublishPackages(id);
+        try { vaporCompatibilityBiz.validateRelease(release); }
+        catch (IOException error) { throw new BuzzException("原生基座报告读取失败，请检查报告文件"); }
         validateWgtRepairVersion(release, packages);
 
         release.setStatus(AppReleaseConstants.STATUS_PUBLISHED);
@@ -261,11 +323,16 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         String platform = request.getPlatform().trim();
         String channel = request.getChannel().trim();
         long currentVersionCode = request.getCurrentVersionCode();
-        if (!AppReleaseConstants.PLATFORM_APP_PLUS.equals(platform)) return AppReleaseCheckRet.noUpdate();
+        String runtime = request.getRuntimeType();
+        boolean vapor = VaporCompatibilityBiz.VAPOR.equals(runtime);
+        if (vapor ? !"ANDROID".equals(platform) || request.getCurrentWgtVersionCode() == null
+                || request.getCurrentWgtVersionCode() < 1 : !"APP_PLUS".equals(runtime) || !"APP_PLUS".equals(platform)) return AppReleaseCheckRet.noUpdate();
         long currentWgtVersionCode = defaultValue(request.getCurrentWgtVersionCode(), currentVersionCode);
 
         List<AppRelease> releases = lambdaQuery()
                 .eq(AppRelease::getAppId, app.getId())
+                .eq(AppRelease::getRuntimeType, runtime)
+                .eq(AppRelease::getPlatform, platform)
                 .eq(AppRelease::getChannel, channel)
                 .eq(AppRelease::getStatus, AppReleaseConstants.STATUS_PUBLISHED)
                 .gt(AppRelease::getVersionCode, currentWgtVersionCode)
@@ -275,11 +342,12 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
         for (AppRelease release : releases) {
             if (!matchesDeviceScope(release, request.getDeviceId())) continue;
+            if (vapor && !vaporCompatibilityBiz.compatibleWithApk(release, currentVersionCode)) continue;
             if (release.getMinSupportedVersionCode() != null
                     && currentVersionCode < release.getMinSupportedVersionCode()) continue;
             List<AppReleasePackage> packages = appReleasePackageBiz.listByReleaseId(release.getId());
             AppReleasePackage releasePackage = findPackage(packages, AppReleaseConstants.PACKAGE_WGT);
-            if (releasePackage == null) continue;
+            if (releasePackage == null || !platform.equals(releasePackage.getPlatform())) continue;
 
             FileSave fileSave = fileSaveBiz.getByIdWithCache(releasePackage.getFileId());
             if (fileSave == null) continue;
@@ -333,12 +401,13 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
     /** 已撤回的较高 WGT 可能仍安装在用户设备上，修复版本必须高于所有已发布或已撤回版本。 */
     private void validateWgtRepairVersion(AppRelease release, List<AppReleasePackage> packages) {
         boolean wgtPackage = packages.stream().anyMatch(packageInfo ->
-                AppReleaseConstants.PLATFORM_APP_PLUS.equals(packageInfo.getPlatform())
-                        && AppReleaseConstants.PACKAGE_WGT.equals(packageInfo.getPackageType()));
+                AppReleaseConstants.PACKAGE_WGT.equals(packageInfo.getPackageType()));
         if (!wgtPackage) return;
 
         List<AppRelease> higherReleaseCandidates = lambdaQuery()
                 .eq(AppRelease::getAppId, release.getAppId())
+                .eq(AppRelease::getRuntimeType, release.getRuntimeType())
+                .eq(AppRelease::getPlatform, release.getPlatform())
                 .eq(AppRelease::getChannel, release.getChannel())
                 .in(AppRelease::getStatus,
                         AppReleaseConstants.STATUS_PUBLISHED,
@@ -349,8 +418,7 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
         for (AppRelease candidate : higherReleaseCandidates) {
             boolean isWgt = appReleasePackageBiz.listByReleaseId(candidate.getId()).stream().anyMatch(packageInfo ->
-                    AppReleaseConstants.PLATFORM_APP_PLUS.equals(packageInfo.getPlatform())
-                            && AppReleaseConstants.PACKAGE_WGT.equals(packageInfo.getPackageType()));
+                    AppReleaseConstants.PACKAGE_WGT.equals(packageInfo.getPackageType()));
             if (isWgt) {
                 throw new BuzzException("修复 WGT 版本号必须高于同渠道已发布或已撤回的最高 WGT 版本");
             }
@@ -358,6 +426,10 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
     }
 
     private void validateDraft(AppRelease entity, Long excludeId) {
+        if (!("APP_PLUS".equals(entity.getRuntimeType()) && "APP_PLUS".equals(entity.getPlatform()))
+                && !(VaporCompatibilityBiz.VAPOR.equals(entity.getRuntimeType()) && "ANDROID".equals(entity.getPlatform()))) {
+            throw new BuzzException("不支持的运行时与平台组合");
+        }
         if (entity.getAppId() == null) throw new BuzzException("APP ID不能为空");
         if (apkBiz.getById(entity.getAppId()) == null) throw new BuzzException("APP ID异常，请检查");
         if (entity.getVersionName() == null || entity.getVersionName().isBlank()) {
@@ -389,6 +461,8 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
 
         long count = lambdaQuery()
                 .eq(AppRelease::getAppId, entity.getAppId())
+                .eq(AppRelease::getRuntimeType, entity.getRuntimeType())
+                .eq(AppRelease::getPlatform, entity.getPlatform())
                 .eq(AppRelease::getVersionCode, entity.getVersionCode())
                 .eq(AppRelease::getChannel, entity.getChannel())
                 .ne(excludeId != null, AppRelease::getId, excludeId)
@@ -504,6 +578,10 @@ public class AppReleaseBiz extends BaseBiz<AppReleaseMapper, AppRelease> {
         result.setSize(releasePackage.getSize() != null ? releasePackage.getSize() : fileSave.getSize());
         result.setSha256(releasePackage.getSha256());
         result.setReleaseNote(release.getReleaseNote());
+        result.setRuntimeType(release.getRuntimeType());
+        result.setPlatform(release.getPlatform());
+        result.setNativeBaseReportFileId(release.getNativeBaseReportFileId());
+        if (VaporCompatibilityBiz.VAPOR.equals(release.getRuntimeType())) result.setMinRuntimeVersion("5.31");
         return result;
     }
 
