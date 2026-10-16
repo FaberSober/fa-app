@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import jakarta.servlet.http.HttpServletResponse;
 
 import com.faber.api.app.release.vo.req.AppReleaseCheckReq;
 import com.faber.api.app.release.vo.req.AppReleaseAutoMatchReq;
@@ -38,21 +39,27 @@ public class AppReleaseController extends BaseController<AppReleaseBiz, AppRelea
     @IgnoreUserToken
     @LogNoRet
     @PostMapping("/check")
-    public Ret<AppReleaseCheckRet> check(@Validated @RequestBody AppReleaseCheckReq request) {
+    public Ret<AppReleaseCheckRet> check(@Validated @RequestBody AppReleaseCheckReq request, HttpServletResponse response) {
+        response.setHeader("Cache-Control", "private, no-store");
+        response.setHeader("Referrer-Policy", "no-referrer");
         return ok(baseBiz.checkWgt(request));
     }
 
     @IgnoreUserToken
     @LogNoRet
     @PostMapping("/checkApk")
-    public Ret<AppReleaseCheckRet> checkApk(@Validated @RequestBody AppReleaseCheckReq request) throws IOException {
+    public Ret<AppReleaseCheckRet> checkApk(@Validated @RequestBody AppReleaseCheckReq request, HttpServletResponse response) throws IOException {
+        response.setHeader("Cache-Control", "private, no-store");
+        response.setHeader("Referrer-Policy", "no-referrer");
         return ok(baseBiz.checkApk(request));
     }
 
     @IgnoreUserToken
     @LogNoRet
     @PostMapping("/checkWgt")
-    public Ret<AppReleaseCheckRet> checkWgt(@Validated @RequestBody AppReleaseCheckReq request) {
+    public Ret<AppReleaseCheckRet> checkWgt(@Validated @RequestBody AppReleaseCheckReq request, HttpServletResponse response) {
+        response.setHeader("Cache-Control", "private, no-store");
+        response.setHeader("Referrer-Policy", "no-referrer");
         return ok(baseBiz.checkWgt(request));
     }
 
